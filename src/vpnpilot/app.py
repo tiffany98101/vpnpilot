@@ -8,9 +8,10 @@ import signal
 import sys
 from importlib.resources import files
 
-import qasync
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QMessageBox
+
+from ._qasync_shim import QEventLoop
 
 from . import APP_NAME
 from .cli import ProtonCLI
@@ -59,7 +60,7 @@ def main() -> int:
     if not ProtonCLI.is_installed():
         return _show_cli_missing(app)
 
-    loop = qasync.QEventLoop(app)
+    loop = QEventLoop(app)
     asyncio.set_event_loop(loop)
 
     cli = ProtonCLI()

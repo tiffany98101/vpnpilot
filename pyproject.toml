@@ -40,9 +40,11 @@ vpnpilot = "vpnpilot.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["vpnpilot*"]
 
 [tool.setuptools.package-data]
 vpnpilot = ["resources/*.svg"]
+"vpnpilot._vendor.qasync" = ["*.py"]
 
 [tool.ruff]
 line-length = 100

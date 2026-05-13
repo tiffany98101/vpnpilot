@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=vpnpilot
+GenericName=ProtonVPN Tray
+Comment=Unofficial tray UI for the ProtonVPN CLI
+Exec=vpnpilot
+Icon=vpnpilot
+Terminal=false
+Categories=Network;Qt;
+Keywords=VPN;ProtonVPN;Tray;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
