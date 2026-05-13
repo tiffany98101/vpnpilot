@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" width="22" height="22">
+  <title>vpnpilot — transitioning</title>
+  <path d="M11 2 L18 5 L18 11 C18 15 15 19 11 20 C7 19 4 15 4 11 L4 5 Z"
+        fill="#ef6c00" stroke="#bf360c" stroke-width="0.8" stroke-linejoin="round"/>
+  <!-- ellipsis -->
+  <circle cx="7.5" cy="12" r="1.4" fill="#ffffff"/>
+  <circle cx="11" cy="12" r="1.4" fill="#ffffff"/>
+  <circle cx="14.5" cy="12" r="1.4" fill="#ffffff"/>
+</svg>

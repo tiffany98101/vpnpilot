@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" width="22" height="22">
+  <title>vpnpilot — connected</title>
+  <!-- shield outline -->
+  <path d="M11 2 L18 5 L18 11 C18 15 15 19 11 20 C7 19 4 15 4 11 L4 5 Z"
+        fill="#2e7d32" stroke="#1b5e20" stroke-width="0.8" stroke-linejoin="round"/>
+  <!-- check -->
+  <path d="M7.5 11.5 L10 14 L15 8.5" fill="none" stroke="#ffffff"
+        stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
