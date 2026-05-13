@@ -47,7 +47,7 @@ if qtapi_env:
             )
         )
 
-    logger.info("Forcing use of {} as Qt Implementation".format(QtModuleName))
+    logger.info(f"Forcing use of {QtModuleName} as Qt Implementation")
     QtModule = importlib.import_module(QtModuleName)
 
 # If a Qt lib is already imported, use that
@@ -490,7 +490,7 @@ class _QEventLoop:
             raise TypeError("coroutines cannot be used with call_later")
         if not callable(callback):
             raise TypeError(
-                "callback must be callable: {}".format(type(callback).__name__)
+                f"callback must be callable: {type(callback).__name__}"
             )
 
         self.__log_debug(
@@ -702,7 +702,7 @@ class _QEventLoop:
 
         log_lines = [message]
         for key in [k for k in sorted(context) if k not in {"message", "exception"}]:
-            log_lines.append("{}: {!r}".format(key, context[key]))
+            log_lines.append(f"{key}: {context[key]!r}")
 
         self.__log_error("\n".join(log_lines), exc_info=exc_info)
 
@@ -769,7 +769,7 @@ class _QEventLoop:
         try:
             cls._logger.error(*args, **kwds)
         except:  # noqa E722
-            sys.stderr.write("{!r}, {!r}\n".format(args, kwds))
+            sys.stderr.write(f"{args!r}, {kwds!r}\n")
 
 
 from ._unix import _SelectorEventLoop  # noqa

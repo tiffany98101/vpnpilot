@@ -11,9 +11,8 @@ from importlib.resources import files
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-from ._qasync_shim import QEventLoop
-
 from . import APP_NAME
+from ._qasync_shim import QEventLoop
 from .cli import ProtonCLI
 from .controller import Controller
 from .detect import default_detector

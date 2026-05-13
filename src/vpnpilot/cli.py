@@ -55,7 +55,7 @@ class ProtonCLI:
             return CLIResult(returncode=127, stdout="", stderr=f"{self._bin}: not found")
         try:
             stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=t)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             try:
                 proc.kill()
                 await proc.wait()

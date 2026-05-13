@@ -51,6 +51,7 @@ vpnpilot = ["resources/*.svg"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["src/vpnpilot/_vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]

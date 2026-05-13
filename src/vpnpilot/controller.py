@@ -8,6 +8,7 @@ knowing about polling or subprocess details.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -88,10 +89,8 @@ class Controller(QObject):
         try:
             while not self._stopping.is_set():
                 await self._poll_once()
-                try:
+                with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._stopping.wait(), timeout=self._poll_interval)
-                except asyncio.TimeoutError:
-                    pass
         except asyncio.CancelledError:
             pass
 

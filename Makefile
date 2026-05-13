@@ -44,10 +44,9 @@ lint: install-dev
 	$(RUFF) check src tests
 	$(RUFF) format --check src tests
 
-sdist: $(DIST)/$(PROJECT)-$(VERSION).tar.gz
-
-$(DIST)/$(PROJECT)-$(VERSION).tar.gz:
+sdist:
 	@mkdir -p $(DIST)
+	@rm -f $(DIST)/$(PROJECT)-$(VERSION).tar.gz
 	git archive --format=tar.gz --prefix=$(PROJECT)-$(VERSION)/ \
 		-o $(DIST)/$(PROJECT)-$(VERSION).tar.gz HEAD
 

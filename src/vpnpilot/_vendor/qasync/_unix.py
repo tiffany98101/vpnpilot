@@ -32,7 +32,7 @@ class _SelectorMapping(collections.abc.Mapping):
             fd = self._selector._fileobj_lookup(fileobj)
             return self._selector._fd_to_key[fd]
         except KeyError:
-            raise KeyError("{!r} is not registered".format(fileobj)) from None
+            raise KeyError(f"{fileobj!r} is not registered") from None
 
     def __iter__(self):
         return iter(self._selector._fd_to_key)
@@ -74,14 +74,14 @@ class _Selector(selectors.BaseSelector):
 
     def register(self, fileobj, events, data=None):
         if (not events) or (events & ~(EVENT_READ | EVENT_WRITE)):
-            raise ValueError("Invalid events: {!r}".format(events))
+            raise ValueError(f"Invalid events: {events!r}")
 
         key = selectors.SelectorKey(
             fileobj, self._fileobj_lookup(fileobj), events, data
         )
 
         if key.fd in self._fd_to_key:
-            raise KeyError("{!r} (FD {}) is already registered".format(fileobj, key.fd))
+            raise KeyError(f"{fileobj!r} (FD {key.fd}) is already registered")
 
         self._fd_to_key[key.fd] = key
 
@@ -120,7 +120,7 @@ class _Selector(selectors.BaseSelector):
         try:
             key = self._fd_to_key.pop(self._fileobj_lookup(fileobj))
         except KeyError:
-            raise KeyError("{!r} is not registered".format(fileobj)) from None
+            raise KeyError(f"{fileobj!r} is not registered") from None
 
         drop_notifier(self.__read_notifiers)
         drop_notifier(self.__write_notifiers)
@@ -131,7 +131,7 @@ class _Selector(selectors.BaseSelector):
         try:
             key = self._fd_to_key[self._fileobj_lookup(fileobj)]
         except KeyError:
-            raise KeyError("{!r} is not registered".format(fileobj)) from None
+            raise KeyError(f"{fileobj!r} is not registered") from None
         if events != key.events:
             self.unregister(fileobj)
             key = self.register(fileobj, events, data)
