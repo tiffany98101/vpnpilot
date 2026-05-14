@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import APP_NAME, __version__
 from .controller import Controller
+from .main_window import MainWindow
+from .preset import PresetStore
 from .signin_panel import SignInPanel
 from .state import AuthState, ConnectionInfo, ConnState
 from .user_state import NullPersistence, Persistence
@@ -30,14 +32,17 @@ class TrayApp:
         app: QApplication,
         controller: Controller,
         *,
+        preset_store: PresetStore,
         persistence: Persistence | None = None,
     ) -> None:
         self._app = app
         self._controller = controller
+        self._preset_store = preset_store
         self._persistence = persistence or NullPersistence()
         self._tray = QSystemTrayIcon()
         self._tray.setToolTip(f"{APP_NAME} {__version__}")
         self._signin_panel: SignInPanel | None = None
+        self._main_window: MainWindow | None = None
         self._build_menu()
         self._connect_signals()
         self._render(controller.current)
@@ -66,6 +71,14 @@ class TrayApp:
 
         self._menu.addSeparator()
 
+        # Open main window — present in every auth/connection state.
+        # Left-click on the tray icon does the same thing (wired below).
+        self._open_window_action = QAction("Open VPNPilot…")
+        self._open_window_action.triggered.connect(self._open_main_window)
+        self._menu.addAction(self._open_window_action)
+
+        self._menu.addSeparator()
+
         self._connect_seattle_action = QAction("Connect to Seattle")
         self._connect_seattle_action.triggered.connect(
             lambda: self._controller.connect_preset_seattle()
@@ -87,6 +100,23 @@ class TrayApp:
     def _connect_signals(self) -> None:
         self._controller.state_changed.connect(self._render)
         self._controller.error_occurred.connect(self._on_error)
+        # Left-click on the tray icon opens the main window. The tray
+        # previously had no .activated handler, so this is purely
+        # additive — context menu (right-click) keeps working as before.
+        self._tray.activated.connect(self._on_tray_activated)
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self._open_main_window()
+
+    def _open_main_window(self) -> None:
+        # Singleton: a single instance is created lazily and reused.
+        # Hidden on close (see MainWindow.closeEvent), shown/raised here.
+        if self._main_window is None:
+            self._main_window = MainWindow(self._controller, self._preset_store)
+        self._main_window.show()
+        self._main_window.raise_()
+        self._main_window.activateWindow()
 
     def _on_quit(self) -> None:
         self._controller.stop()

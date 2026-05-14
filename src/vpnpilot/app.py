@@ -95,7 +95,7 @@ def main() -> int:
         cli, detector, persistence=store, preset_store=preset_store
     )
 
-    tray = TrayApp(app, controller, persistence=store)
+    tray = TrayApp(app, controller, preset_store=preset_store, persistence=store)
     tray.show()
 
     # Ctrl-C in a terminal should exit cleanly.
