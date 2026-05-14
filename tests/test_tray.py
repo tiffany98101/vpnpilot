@@ -123,6 +123,17 @@ def test_dynamic_actions_disabled_when_signed_out(qapp_instance, store):
         assert a.isEnabled() is False
 
 
+def test_disconnect_stays_enabled_when_connected_even_if_signed_out(
+    qapp_instance, store
+):
+    ctrl = FakeController()
+    tray = TrayApp(qapp_instance, ctrl, preset_store=store)
+    ctrl.state_changed.emit(
+        ConnectionInfo(state=ConnState.CONNECTED, auth=AuthState.SIGNED_OUT)
+    )
+    assert tray._disconnect_action.isEnabled() is True
+
+
 def test_dynamic_actions_disabled_when_connected(qapp_instance, store):
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)

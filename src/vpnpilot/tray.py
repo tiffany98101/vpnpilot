@@ -223,7 +223,7 @@ class TrayApp:
             self._status_action.setText("Status: not signed in")
             self._server_action.setVisible(False)
             self._signin_action.setVisible(True)
-            self._disconnect_action.setEnabled(False)
+            self._disconnect_action.setEnabled(info.state is ConnState.CONNECTED)
             self._apply_state_to_dynamic_actions(info)
             self._tray.setToolTip("ProtonVPN: not signed in")
             return

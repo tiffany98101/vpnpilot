@@ -5,6 +5,7 @@ Summary:        Unofficial tray UI for the ProtonVPN CLI
 
 # vpnpilot is MIT. Bundled qasync is BSD-2-Clause.
 License:        MIT AND BSD-2-Clause
+# TODO: replace with canonical upstream project URL once publicly published.
 URL:            https://example.invalid/vpnpilot
 Source0:        %{name}-%{version}.tar.gz
 

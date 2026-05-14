@@ -89,10 +89,7 @@ def make_cli(
     countries_ok: bool = True,
     cities_results: dict[str, CLIResult] | None = None,
 ) -> ScriptedCLI:
-    if countries_ok:
-        cr = CLIResult(0, COUNTRIES_STDOUT, "")
-    else:
-        cr = CLIResult(2, "", AUTH_ERR_STDERR)
+    cr = CLIResult(0, COUNTRIES_STDOUT, "") if countries_ok else CLIResult(2, "", AUTH_ERR_STDERR)
     default_cities = CLIResult(0, CITIES_US_STDOUT, "")
     return ScriptedCLI(cr, cities_results or {}, cities_default=default_cities)
 
@@ -260,6 +257,38 @@ async def test_refresh_clears_cache_and_refetches(qapp):
     catalog.refresh()
     await catalog.countries()
     assert cli.countries_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_ignores_stale_in_flight_city_result(qapp):
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def stale_city_result(_code):
+        started.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            # Simulate a subprocess wrapper that still returns a result
+            # even after a cancellation request.
+            await release.wait()
+        return CLIResult(0, CITIES_US_STDOUT, "")
+
+    cli = make_cli()
+    cli.cities_list = stale_city_result  # type: ignore[method-assign]
+    catalog = ServerCatalog(cli)
+    catalog.cities("US")
+    old_task = catalog._loading_tasks["US"]
+    await started.wait()
+
+    catalog.refresh()
+    assert catalog.entry_state("US") is EntryState.NOT_FETCHED
+
+    release.set()
+    await old_task
+
+    assert catalog.entry_state("US") is EntryState.NOT_FETCHED
+    assert catalog.cities_if_loaded("US") is None
 
 
 # ---- prewarm() test -------------------------------------------------

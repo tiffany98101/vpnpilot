@@ -40,6 +40,7 @@ class ServerCatalog(QObject):
     def __init__(self, cli: ProtonCLI, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._cli = cli
+        self._generation = 0
         self._countries: list[Country] | None = None
         self._countries_error: str | None = None
         self._countries_task: asyncio.Task | None = None
@@ -55,14 +56,30 @@ class ServerCatalog(QObject):
         Raises CatalogError if the fetch fails (e.g. signed-out).
         Concurrent callers share the same in-flight task.
         """
-        if self._countries is not None:
+        while True:
+            if self._countries is not None:
+                return self._countries
+            task = self._countries_task
+            if task is None or task.done():
+                task = asyncio.create_task(self._fetch_countries(self._generation))
+                self._countries_task = task
+            try:
+                await task
+            except asyncio.CancelledError:
+                # refresh() can cancel an in-flight fetch. If *this* await
+                # was cancelled by the caller, re-raise.
+                if not task.cancelled():
+                    raise
+                if self._countries_task is task:
+                    self._countries_task = None
+                continue
+            if self._countries is None:
+                # A stale task can complete after refresh() if the wrapped
+                # coroutine swallows cancellation. Start a fresh fetch.
+                if self._countries_task is not task:
+                    continue
+                raise CatalogError(self._countries_error or "Failed to load countries")
             return self._countries
-        if self._countries_task is None or self._countries_task.done():
-            self._countries_task = asyncio.create_task(self._fetch_countries())
-        await self._countries_task
-        if self._countries is None:
-            raise CatalogError(self._countries_error or "Failed to load countries")
-        return self._countries
 
     def cities(self, country_code: str) -> CatalogEntry:
         """Return the current CatalogEntry for country_code.
@@ -81,7 +98,7 @@ class ServerCatalog(QObject):
             self._entries[code] = CatalogEntry(country_code=code)
         entry = self._entries[code]
         if entry.state is EntryState.NOT_FETCHED and code not in self._loading_tasks:
-            task = asyncio.create_task(self._fetch_cities(code))
+            task = asyncio.create_task(self._fetch_cities(code, self._generation))
             self._loading_tasks[code] = task
             entry.state = EntryState.LOADING
         return entry
@@ -93,13 +110,25 @@ class ServerCatalog(QObject):
         Raises CatalogError on failure.
         """
         code = country_code.upper()
-        entry = self.cities(code)
-        if code in self._loading_tasks:
-            await self._loading_tasks[code]
-        entry = self._entries[code]
-        if entry.state is EntryState.LOADED:
-            return entry.cities
-        raise CatalogError(entry.last_error or f"Failed to load cities for {code}")
+        while True:
+            self.cities(code)
+            task = self._loading_tasks.get(code)
+            if task is not None:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    # refresh() can cancel an in-flight fetch. If *this*
+                    # await was cancelled by the caller, re-raise.
+                    if not task.cancelled():
+                        raise
+                    continue
+            entry = self._entries.get(code)
+            if entry is None:
+                # Cache was refreshed while we were waiting.
+                continue
+            if entry.state is EntryState.LOADED:
+                return entry.cities
+            raise CatalogError(entry.last_error or f"Failed to load cities for {code}")
 
     def cities_sync(self, country_code: str) -> list[City]:
         """Blocking fetch. For use outside the Qt event loop (tests, dump command)."""
@@ -112,8 +141,9 @@ class ServerCatalog(QObject):
         Safe to call multiple times; only one prewarm task runs at a time.
         """
         if self._prewarm_task is None or self._prewarm_task.done():
+            generation = self._generation
             self._prewarm_task = asyncio.create_task(
-                self._prewarm_loop(), name="vpnpilot-catalog-prewarm"
+                self._prewarm_loop(generation), name="vpnpilot-catalog-prewarm"
             )
 
     def countries_if_ready(self) -> list[Country] | None:
@@ -146,19 +176,27 @@ class ServerCatalog(QObject):
 
     def refresh(self) -> None:
         """Drop the cache and allow a fresh fetch on next access."""
+        self._generation += 1
+        if self._countries_task and not self._countries_task.done():
+            self._countries_task.cancel()
+        for task in list(self._loading_tasks.values()):
+            if not task.done():
+                task.cancel()
+        if self._prewarm_task and not self._prewarm_task.done():
+            self._prewarm_task.cancel()
         self._countries = None
         self._countries_error = None
         self._countries_task = None
         self._entries.clear()
         self._loading_tasks.clear()
-        if self._prewarm_task and not self._prewarm_task.done():
-            self._prewarm_task.cancel()
         self._prewarm_task = None
 
     # ----- internals -----
 
-    async def _fetch_countries(self) -> None:
+    async def _fetch_countries(self, generation: int) -> None:
         result = await self._cli.countries_list()
+        if generation != self._generation:
+            return
         if result.ok:
             self._countries = parse_countries(result.stdout)
             self._countries_error = None
@@ -168,20 +206,30 @@ class ServerCatalog(QObject):
             log.warning("countries list failed (exit %d): %s", result.returncode, self._countries_error)
         self.catalog_changed.emit("")
 
-    async def _fetch_cities(self, country_code: str) -> None:
+    async def _fetch_cities(self, country_code: str, generation: int) -> None:
         result = await self._cli.cities_list(country_code)
-        entry = self._entries[country_code]
-        if result.ok:
-            entry.cities = parse_cities(result.stdout, country_code)
-            entry.state = EntryState.LOADED
-            entry.last_fetched_at = datetime.now(UTC)
-            entry.last_error = None
-        else:
-            entry.state = EntryState.FAILED
-            entry.last_error = result.stderr.strip()
-            log.warning("cities list %s failed (exit %d): %s", country_code, result.returncode, entry.last_error)
-        self._loading_tasks.pop(country_code, None)
-        self.catalog_changed.emit(country_code)
+        if generation == self._generation:
+            entry = self._entries.get(country_code)
+            if entry is not None:
+                if result.ok:
+                    entry.cities = parse_cities(result.stdout, country_code)
+                    entry.state = EntryState.LOADED
+                    entry.last_fetched_at = datetime.now(UTC)
+                    entry.last_error = None
+                else:
+                    entry.state = EntryState.FAILED
+                    entry.last_error = result.stderr.strip()
+                    log.warning(
+                        "cities list %s failed (exit %d): %s",
+                        country_code,
+                        result.returncode,
+                        entry.last_error,
+                    )
+        task = asyncio.current_task()
+        if self._loading_tasks.get(country_code) is task:
+            self._loading_tasks.pop(country_code, None)
+        if generation == self._generation:
+            self.catalog_changed.emit(country_code)
 
     async def _fetch_cities_direct(self, country_code: str) -> list[City]:
         """Standalone fetch with no cache interaction; used by cities_sync."""
@@ -191,14 +239,22 @@ class ServerCatalog(QObject):
             raise CatalogError(result.stderr.strip())
         return parse_cities(result.stdout, code)
 
-    async def _prewarm_loop(self) -> None:
+    async def _prewarm_loop(self, generation: int) -> None:
+        if generation != self._generation:
+            return
         try:
             countries = await self.countries()
+        except asyncio.CancelledError:
+            return
         except CatalogError as exc:
             log.warning("prewarm aborted: %s", exc)
             return
         for country in countries:
+            if generation != self._generation:
+                return
             try:
                 await self.cities_async(country.code)
+            except asyncio.CancelledError:
+                return
             except CatalogError as exc:
                 log.warning("prewarm: failed to fetch cities for %s: %s", country.code, exc)
