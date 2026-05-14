@@ -79,14 +79,6 @@ class Controller(QObject):
             return
         self._spawn(self._do_connect(**preset_to_connect_kwargs(preset)))
 
-    def connect_preset_seattle(self) -> None:
-        # Legacy hardcoded entry — preserved until the tray's dynamic
-        # preset menu lands. Same gating as connect_preset.
-        if self._current.auth is AuthState.SIGNED_OUT:
-            self.error_occurred.emit("Sign in to ProtonVPN first.")
-            return
-        self._spawn(self._do_connect(city="Seattle"))
-
     def disconnect(self) -> None:
         self._spawn(self._do_disconnect())
 

@@ -55,7 +55,7 @@ def qapp():
 
 
 @pytest.mark.asyncio
-async def test_connect_seattle_calls_cli_with_city(qapp):
+async def test_connect_preset_emits_transitioning_then_connected(qapp, tmp_path):
     cli = ScriptedCLI(
         connect_result=CLIResult(0, "", ""),
         disconnect_result=CLIResult(0, "", ""),
@@ -63,19 +63,19 @@ async def test_connect_seattle_calls_cli_with_city(qapp):
     detector = ScriptedDetector(answers=[
         ConnectionInfo(state=ConnState.CONNECTED, interface="proton0", server="US-WA#1", city="Seattle", country="US"),
     ])
-    ctrl = Controller(cli, detector, poll_interval=0.05)
+    store = PresetStore(path=tmp_path / "presets.json")
+    seattle = store.load()[0]
+    ctrl = Controller(cli, detector, poll_interval=0.05, preset_store=store)
     captured: list[ConnectionInfo] = []
     ctrl.state_changed.connect(captured.append)
 
-    ctrl.connect_preset_seattle()
-    # Let the in-flight task complete.
+    ctrl.connect_preset(seattle.id)
     for _ in range(20):
         await asyncio.sleep(0.01)
         if ctrl._in_flight and ctrl._in_flight.done():
             break
 
     assert cli.connect_calls == [{"city": "Seattle"}]
-    # We should have seen TRANSITIONING, then CONNECTED.
     states = [info.state for info in captured]
     assert ConnState.TRANSITIONING in states
     assert ConnState.CONNECTED in states
@@ -100,43 +100,23 @@ async def test_disconnect_calls_cli(qapp):
 
 
 @pytest.mark.asyncio
-async def test_cli_failure_surfaces_via_error_signal(qapp):
+async def test_cli_failure_surfaces_via_error_signal(qapp, tmp_path):
     cli = ScriptedCLI(
         connect_result=CLIResult(1, "", "boom: server unreachable"),
         disconnect_result=CLIResult(0, "", ""),
     )
     detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
-    ctrl = Controller(cli, detector)
+    store = PresetStore(path=tmp_path / "presets.json")
+    seattle = store.load()[0]
+    ctrl = Controller(cli, detector, preset_store=store)
     errors: list[str] = []
     ctrl.error_occurred.connect(errors.append)
-    ctrl.connect_preset_seattle()
+    ctrl.connect_preset(seattle.id)
     for _ in range(20):
         await asyncio.sleep(0.01)
         if ctrl._in_flight and ctrl._in_flight.done():
             break
     assert errors and "boom" in errors[0]
-
-
-@pytest.mark.asyncio
-async def test_legacy_connect_seattle_blocked_when_signed_out(qapp):
-    cli = ScriptedCLI(
-        connect_result=CLIResult(0, "", ""),
-        disconnect_result=CLIResult(0, "", ""),
-    )
-    detector = ScriptedDetector(answers=[
-        ConnectionInfo(state=ConnState.DISCONNECTED, auth=AuthState.SIGNED_OUT),
-    ])
-    ctrl = Controller(cli, detector)
-    errors: list[str] = []
-    ctrl.error_occurred.connect(errors.append)
-
-    # Force one poll so the controller learns auth=SIGNED_OUT.
-    await ctrl._refresh_state()
-
-    ctrl.connect_preset_seattle()
-    await asyncio.sleep(0.02)
-    assert cli.connect_calls == []
-    assert errors and "sign in" in errors[0].lower()
 
 
 @pytest.mark.asyncio
@@ -278,7 +258,7 @@ async def test_connect_preset_without_store_emits_error(qapp):
 
 
 @pytest.mark.asyncio
-async def test_duplicate_command_while_in_flight_is_ignored(qapp):
+async def test_duplicate_command_while_in_flight_is_ignored(qapp, tmp_path):
     slow_cli = ScriptedCLI(
         connect_result=CLIResult(0, "", ""),
         disconnect_result=CLIResult(0, "", ""),
@@ -292,10 +272,12 @@ async def test_duplicate_command_while_in_flight_is_ignored(qapp):
     slow_cli.connect = slow_connect  # type: ignore[assignment]
 
     detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
-    ctrl = Controller(slow_cli, detector)
-    ctrl.connect_preset_seattle()
-    ctrl.connect_preset_seattle()  # should be ignored
-    ctrl.connect_preset_seattle()  # ditto
+    store = PresetStore(path=tmp_path / "presets.json")
+    seattle = store.load()[0]
+    ctrl = Controller(slow_cli, detector, preset_store=store)
+    ctrl.connect_preset(seattle.id)
+    ctrl.connect_preset(seattle.id)  # should be ignored
+    ctrl.connect_preset(seattle.id)  # ditto
 
     for _ in range(40):
         await asyncio.sleep(0.01)

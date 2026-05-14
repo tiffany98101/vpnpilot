@@ -79,11 +79,12 @@ class TrayApp:
 
         self._menu.addSeparator()
 
-        self._connect_seattle_action = QAction("Connect to Seattle")
-        self._connect_seattle_action.triggered.connect(
-            lambda: self._controller.connect_preset_seattle()
-        )
-        self._menu.addAction(self._connect_seattle_action)
+        # Dynamic connect section. The actions for "Connect to <default>"
+        # and the "Connect to…" submenu are inserted before
+        # _disconnect_action and rebuilt on `aboutToShow` so they reflect
+        # the current preset store state without explicit notifications.
+        self._dynamic_actions: list[QAction] = []
+        self._connect_submenu: QMenu | None = None
 
         self._disconnect_action = QAction("Disconnect")
         self._disconnect_action.triggered.connect(lambda: self._controller.disconnect())
@@ -91,11 +92,71 @@ class TrayApp:
 
         self._menu.addSeparator()
 
-        quit_action = QAction("Quit")
-        quit_action.triggered.connect(self._on_quit)
-        self._menu.addAction(quit_action)
+        # NB: must keep a Python reference; addAction() doesn't take
+        # ownership of the QAction, and a local would be GC'd.
+        self._quit_action = QAction("Quit")
+        self._quit_action.triggered.connect(self._on_quit)
+        self._menu.addAction(self._quit_action)
+
+        # Rebuild dynamic section right before the user sees the menu.
+        # Also rebuild now so the initial state is correct.
+        self._menu.aboutToShow.connect(self._rebuild_connect_section)
+        self._rebuild_connect_section()
 
         self._tray.setContextMenu(self._menu)
+
+    def _rebuild_connect_section(self) -> None:
+        """Rebuild the (Connect to default + submenu) section in place."""
+        # Drop old dynamic actions/submenu — Qt does not auto-destroy
+        # them when removeAction is called, so we keep the lambdas alive
+        # via Python references only until this point.
+        for action in self._dynamic_actions:
+            self._menu.removeAction(action)
+        self._dynamic_actions.clear()
+        if self._connect_submenu is not None:
+            self._connect_submenu.deleteLater()
+            self._connect_submenu = None
+
+        presets = self._preset_store.list_all()
+        if not presets:
+            return
+
+        default = presets[0]
+        non_default = presets[1:]
+
+        connect_default = QAction(f"Connect to {default.name}", self._menu)
+        default_id = default.id
+        connect_default.triggered.connect(
+            lambda checked=False, pid=default_id: self._controller.connect_preset(pid)
+        )
+        self._menu.insertAction(self._disconnect_action, connect_default)
+        self._dynamic_actions.append(connect_default)
+
+        if non_default:
+            submenu = QMenu("Connect to…", self._menu)
+            for p in non_default:
+                act = submenu.addAction(p.name)
+                pid = p.id
+                act.triggered.connect(
+                    lambda checked=False, x=pid: self._controller.connect_preset(x)
+                )
+            submenu_action = self._menu.insertMenu(self._disconnect_action, submenu)
+            self._dynamic_actions.append(submenu_action)
+            self._connect_submenu = submenu
+
+        # Apply current-state enable/disable to the freshly-built actions.
+        self._apply_state_to_dynamic_actions(self._controller.current)
+
+    def _apply_state_to_dynamic_actions(self, info: ConnectionInfo) -> None:
+        # Disabled when signed-out (can't connect) or when something is
+        # already in flight / connected. Matches the previous hardcoded
+        # Seattle entry's enable rule.
+        if info.auth is AuthState.SIGNED_OUT:
+            enabled = False
+        else:
+            enabled = info.state is ConnState.DISCONNECTED
+        for a in self._dynamic_actions:
+            a.setEnabled(enabled)
 
     def _connect_signals(self) -> None:
         self._controller.state_changed.connect(self._render)
@@ -155,8 +216,8 @@ class TrayApp:
             self._status_action.setText("Status: not signed in")
             self._server_action.setVisible(False)
             self._signin_action.setVisible(True)
-            self._connect_seattle_action.setEnabled(False)
             self._disconnect_action.setEnabled(False)
+            self._apply_state_to_dynamic_actions(info)
             self._tray.setToolTip("ProtonVPN: not signed in")
             return
 
@@ -173,7 +234,6 @@ class TrayApp:
                     self._server_action.setVisible(True)
                 else:
                     self._server_action.setVisible(False)
-                self._connect_seattle_action.setEnabled(False)
                 self._disconnect_action.setEnabled(True)
                 tip = "vpnpilot — connected"
                 if info.server:
@@ -183,16 +243,15 @@ class TrayApp:
                 self._tray.setIcon(_icon("icon-transitioning.svg"))
                 self._status_action.setText("Status: working…")
                 self._server_action.setVisible(False)
-                self._connect_seattle_action.setEnabled(False)
                 self._disconnect_action.setEnabled(False)
                 self._tray.setToolTip("vpnpilot — working…")
             case _:
                 self._tray.setIcon(_icon("icon-disconnected.svg"))
                 self._status_action.setText("Status: disconnected")
                 self._server_action.setVisible(False)
-                self._connect_seattle_action.setEnabled(True)
                 self._disconnect_action.setEnabled(False)
                 self._tray.setToolTip("vpnpilot — disconnected")
+        self._apply_state_to_dynamic_actions(info)
 
 
 def ensure_tray_available(parent_app: QApplication) -> bool:
