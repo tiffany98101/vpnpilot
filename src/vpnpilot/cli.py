@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import re
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from .state import AuthState, ConnectionInfo, ConnState
@@ -41,6 +42,10 @@ class ProtonCLI:
     @staticmethod
     def is_installed(bin_path: str = PROTONVPN_BIN) -> bool:
         return shutil.which(bin_path) is not None
+
+    async def run_command(self, args: Sequence[str], *, timeout: float | None = None) -> CLIResult:
+        """Generic entry point for running any protonvpn sub-command."""
+        return await self._run(*args, timeout=timeout)
 
     async def _run(self, *args: str, timeout: float | None = None) -> CLIResult:
         t = timeout if timeout is not None else self._timeout
@@ -106,6 +111,12 @@ class ProtonCLI:
 
     async def info(self) -> CLIResult:
         return await self._run("info")
+
+    async def countries_list(self) -> CLIResult:
+        return await self._run("countries", "list", timeout=max(self._timeout, 10.0))
+
+    async def cities_list(self, country_code: str) -> CLIResult:
+        return await self._run("cities", "list", country_code, timeout=max(self._timeout, 10.0))
 
 
 # ---- Parsers (kept next to the format strings they target) -----------
