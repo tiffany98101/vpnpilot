@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 from . import APP_NAME
 from ._qasync_shim import QEventLoop
 from ._singleton import SingletonLock
+from .catalog import ServerCatalog
 from .cli import ProtonCLI
 from .controller import Controller
 from .detect import default_detector
@@ -94,6 +95,7 @@ def main() -> int:
     controller = Controller(
         cli, detector, persistence=store, preset_store=preset_store
     )
+    catalog = ServerCatalog(cli)
 
     tray = TrayApp(app, controller, preset_store=preset_store, persistence=store)
     tray.show()
@@ -105,6 +107,18 @@ def main() -> int:
         app.quit()
 
     signal.signal(signal.SIGINT, _sigint)
+
+    # Start catalog prewarm after the first successful connection-state poll.
+    # This avoids contending with the autoconnect CLI call at startup.
+    _prewarm_started = False
+
+    def _on_first_state(_info):
+        nonlocal _prewarm_started
+        if not _prewarm_started:
+            _prewarm_started = True
+            catalog.prewarm()
+
+    controller.state_changed.connect(_on_first_state)
 
     # Start polling once the loop is alive.
     loop.call_soon(controller.start)
