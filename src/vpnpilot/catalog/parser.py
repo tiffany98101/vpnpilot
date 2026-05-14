@@ -6,6 +6,7 @@ No subprocess calls here — tested against inline fixtures.
 
 from __future__ import annotations
 
+import contextlib
 import re
 
 from .models import City, CityFeature, Country
@@ -68,8 +69,6 @@ def _parse_features(features_str: str) -> frozenset[CityFeature]:
     result: set[CityFeature] = set()
     for token in features_str.split(","):
         token = token.strip()
-        try:
+        with contextlib.suppress(ValueError):
             result.add(CityFeature(token))
-        except ValueError:
-            pass  # forward-compat: ignore unknown feature names
     return frozenset(result)

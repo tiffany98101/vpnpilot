@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -146,7 +146,7 @@ class ServerCatalog(QObject):
         if result.ok:
             entry.cities = parse_cities(result.stdout, country_code)
             entry.state = EntryState.LOADED
-            entry.last_fetched_at = datetime.now(timezone.utc)
+            entry.last_fetched_at = datetime.now(UTC)
             entry.last_error = None
         else:
             entry.state = EntryState.FAILED

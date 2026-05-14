@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import Enum, StrEnum
 
 
-class CityFeature(str, Enum):
+class CityFeature(StrEnum):
     P2P = "P2P"
     TOR = "Tor"
 

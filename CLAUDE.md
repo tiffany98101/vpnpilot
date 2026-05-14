@@ -14,11 +14,13 @@ which handles polkit itself.
 Current scope: tray icon with four UI states (connected, disconnected,
 transitioning, signed-out), state detection on two orthogonal axes
 (connection + auth), modeless Sign-in panel, **modeless main window**
-with status panel + preset list + disconnect footer, and a
+with status panel + preset list + disconnect footer, a
 **user-editable preset library** seeded with a Seattle entry on first
-run. The tray's connect section is dynamic — top entry is the default
-preset, a "Connect to…" submenu lists the rest. No settings UI, server
-browser, or event log yet.
+run, and an in-memory **server catalog** (country + city list from the
+CLI, lazy-fetch + background prewarm, `vpnpilot catalog dump` diagnostic
+command). The tray's connect section is dynamic — top entry is the
+default preset, a "Connect to…" submenu lists the rest. No settings UI,
+server browser UI, or event log yet.
 
 ## Hard constraints
 
@@ -61,7 +63,7 @@ browser, or event log yet.
                  ┌───────────────────────────────────────────────┐
                  │                 vpnpilot.app                   │
                  │  (Qt + qasync bootstrap, DI, signal wiring)    │
-                 └──┬──────────────┬─────────────┬────────────────┘
+                 └──┬──────────────┬─────────────┬───────────────┘
                     │              │             │
                     ▼              ▼             ▼
             vpnpilot.tray  vpnpilot.controller  vpnpilot.preset
@@ -76,18 +78,18 @@ browser, or event log yet.
                 │              ▼            ▼             │
                 │      vpnpilot.detect  vpnpilot.cli      │
                 │   ┌──────────────────┐ ┌─────────────┐  │
-                │   │ Detector ABC     │ │ ProtonCLI   │  │
-                │   │  Interface       │ │ async +     │  │
-                │   │  CLIStatus       │ │ parsers     │  │
-                │   │  Auth            │ └─────────────┘  │
-                │   │  Composite       │                  │
-                │   └──────────────────┘                  │
-                ▼                                         │
-        vpnpilot.main_window ─────────────────────────────┤
-        ┌──────────────────────────────┐                  │
-        │ StatusPanel (state, server,  │                  │
-        │   protocol, auth indicator)  │                  │
-        │ PresetListPanel (QListView + │──── PresetStore ─┘
+                │   │ Detector ABC     │ │ ProtonCLI   │──┼───────────┐
+                │   │  Interface       │ │ async +     │  │           │
+                │   │  CLIStatus       │ │ parsers,    │  │           ▼
+                │   │  Auth            │ │ run_command │  │  vpnpilot.catalog
+                │   │  Composite       │ └─────────────┘  │  ┌────────────────┐
+                │   └──────────────────┘                  │  │ ServerCatalog  │
+                ▼                                         │  │ (QObject,      │
+        vpnpilot.main_window ─────────────────────────────┤  │  lazy-fetch +  │
+        ┌──────────────────────────────┐                  │  │  prewarm,      │
+        │ StatusPanel (state, server,  │                  │  │  catalog_changed│
+        │   protocol, auth indicator)  │                  │  │  signal)       │
+        │ PresetListPanel (QListView + │──── PresetStore ─┘  └────────────────┘
         │   Connect/Edit/Delete/New/   │
         │   Set-Default + uses Preset- │
         │   EditorDialog)              │
@@ -142,6 +144,17 @@ Module roles:
   signed-in email) to `~/.config/vpnpilot/state.json` (0600). This is
   distinct from `presets.json` (user-curated presets) and from
   `settings.json` (user preferences, not yet implemented).
+- `catalog/` — `ServerCatalog(QObject)`: in-memory, session-scoped country
+  and city catalog. `async countries()` caches on first call; `cities(code)`
+  returns a `CatalogEntry` immediately and kicks off a background fetch if the
+  entry is `NOT_FETCHED`; `cities_async(code)` awaits the in-flight task;
+  `cities_sync(code)` is a blocking wrapper for non-Qt callers (dump command,
+  sync tests). `prewarm()` walks all countries sequentially (one at a time —
+  see "Prewarm timing" below). `refresh()` drops all cached state.
+  `catalog_changed(country_code)` signal notifies listeners of state transitions.
+  `catalog/_cli.py` implements `vpnpilot catalog dump` (JSON to stdout, requires
+  a QCoreApplication). Parsers live in `catalog/parser.py`; models in
+  `catalog/models.py` — no Qt, no subprocess calls.
 - `app.py` — bootstrap: QApplication + qasync event loop + DI.
 - `_qasync_shim.py` — prefers system-installed `qasync`, falls back to
   the vendored copy under `_vendor/qasync`.
@@ -169,6 +182,34 @@ the test suite.
 **Never invoke the real CLI in tests.** `tests/test_cli_subprocess.py`
 patches `asyncio.create_subprocess_exec`. Live verification is a
 manual `make run`, not a test.
+
+## Catalog lazy-fetch and prewarm strategy
+
+`ServerCatalog` uses two-phase loading:
+
+1. **Lazy per-country fetch** — `cities(code)` returns a `CatalogEntry`
+   immediately with `state = NOT_FETCHED` (or whatever the current state is)
+   and kicks off a background `asyncio.Task` if the entry hasn't been fetched.
+   Concurrent calls for the same code share the same task (dedup).
+
+2. **Background prewarm** — `prewarm()` walks all countries sequentially,
+   calling `cities_async(code)` for each and awaiting completion before moving
+   on. One country at a time, no parallelism, so we don't hammer the Proton API.
+   Each country's cities take ~1.4–1.5s to fetch (one subprocess call); with
+   ~130 countries the full prewarm takes several minutes, but the data is
+   available lazily before the prewarm finishes.
+
+**Prewarm timing:** prewarm starts on the first `controller.state_changed`
+signal (i.e., after the first successful connection-state poll). This avoids
+contending with the autoconnect CLI call at app startup: both paths shell out
+to the protonvpn CLI, and concurrent subprocess calls slow everything down.
+The one-shot flag in `app.py` ensures prewarm fires exactly once per process.
+
+The 1.4–1.5s per-country timing was measured for `countries list` and
+`cities list`; the cost is the subprocess round-trip to the CLI (which calls
+the Proton API internally). This is not a vpnpilot design choice — it's the
+CLI's cost. If the CLI adds a `--json` or a cached local server list in a
+future version, revisit this.
 
 ## Detection strategy
 
@@ -339,10 +380,11 @@ file is at `/usr/share/applications/vpnpilot.desktop`; icon at
   on transition into CONNECTED, compute `now - t0`).
 - Public-IP display in the status panel (the `connect` line is already
   parsed; the wire-up to the status panel hasn't landed).
-- Country/city server browser. Today the preset editor takes free-text;
-  a browser would let users pick from `countries list` / `cities list`.
-- City autocomplete in the preset editor (depends on a cached country/
-  city list from the browser slice).
+- Country/city server browser UI. The catalog data layer exists
+  (`vpnpilot.catalog`); the browser widget and preset-editor picker
+  integration still need to be built.
+- City autocomplete / picker in the preset editor (catalog is ready;
+  just needs wiring into `PresetEditorDialog`).
 - Settings UI (kill-switch toggle, autoconnect, start-minimized,
   preferred preset, public-IP endpoint).
 - Auto-connect on login (XDG autostart with `--autoconnect`).
