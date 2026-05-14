@@ -1,7 +1,11 @@
-"""Pluggable detection of ProtonVPN connection state.
+"""Pluggable detection of ProtonVPN connection and auth state.
 
-The default composite reads the network interface list (primary) and
-falls back to the CLI status parser (secondary).
+The default composite reads three signals concurrently:
+  * the network interface list (primary truth for connection)
+  * `protonvpn status` output (enrichment when connected)
+  * `protonvpn info` output (auth state)
+
+Connection and auth are reported as orthogonal axes on ConnectionInfo.
 """
 
 from __future__ import annotations
@@ -13,8 +17,8 @@ import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from .cli import ProtonCLI, parse_status
-from .state import ConnectionInfo, ConnState
+from .cli import ProtonCLI, parse_info, parse_status
+from .state import AuthState, ConnectionInfo, ConnState
 
 PROTON_IFACE_RE = re.compile(r"^proton\d+$")
 
@@ -32,7 +36,7 @@ class Detector(ABC):
     async def detect(self) -> ConnectionInfo: ...
 
 
-# -------- 1) Interface detector (primary) ----------------------------
+# -------- 1) Interface detector (primary connection signal) -----------
 
 class InterfaceDetector(Detector):
     """Look at the kernel's network interfaces.
@@ -64,10 +68,6 @@ class InterfaceDetector(Detector):
             flags = self._read_iface_flags(name)
             if flags is None:
                 continue
-            # Linux IFF_UP = 0x1. Some virtual interfaces report UP via the
-            # `operstate` file as "unknown" while being functionally up;
-            # POINTOPOINT wireguard interfaces specifically are observed as
-            # "unknown". Trust the flags byte.
             if flags & 0x1:
                 return IfaceObservation(name=name, up=True)
         return IfaceObservation(name=None, up=False)
@@ -93,7 +93,6 @@ class InterfaceDetector(Detector):
         if cp.returncode != 0:
             return IfaceObservation(name=None, up=False)
         for line in cp.stdout.splitlines():
-            # format: "11: proton0: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu ..."
             try:
                 _, name, flagsblob, *_ = line.split(maxsplit=3)
             except ValueError:
@@ -105,7 +104,7 @@ class InterfaceDetector(Detector):
         return IfaceObservation(name=None, up=False)
 
 
-# -------- 2) CLI status detector (secondary) -------------------------
+# -------- 2) CLI status detector (secondary, for enrichment) ----------
 
 class CLIStatusDetector(Detector):
     def __init__(self, cli: ProtonCLI) -> None:
@@ -118,40 +117,73 @@ class CLIStatusDetector(Detector):
         return parse_status(result.stdout)
 
 
-# -------- 3) Composite (default) -------------------------------------
+# -------- 3) Auth detector (orthogonal axis) --------------------------
 
-class CompositeDetector(Detector):
-    """Use the interface signal as truth; enrich with CLI status data.
+class AuthDetector:
+    """Probes auth state via `protonvpn info`.
 
-    - If the interface check says CONNECTED, we run a status query in
-      parallel to fill in server/city/country/protocol/load.
-    - If the interface check says DISCONNECTED, we trust it. (A
-      lingering CLI status saying "connected" while the interface is
-      gone is a bug in the CLI's state cache, not a connected state.)
+    Not a Detector subclass — its output is partial (auth + email
+    only), and the Composite weaves it into the full ConnectionInfo.
     """
 
-    def __init__(self, primary: Detector, secondary: Detector) -> None:
-        self._primary = primary
-        self._secondary = secondary
+    def __init__(self, cli: ProtonCLI) -> None:
+        self._cli = cli
+
+    async def probe(self) -> tuple[AuthState, str | None]:
+        result = await self._cli.info()
+        if not result.ok:
+            return AuthState.UNKNOWN, None
+        return parse_info(result.stdout)
+
+
+# -------- 4) Composite (default) --------------------------------------
+
+class CompositeDetector(Detector):
+    """Run interface + auth probes concurrently; enrich via status if connected."""
+
+    def __init__(self, interface: Detector, cli_status: Detector, auth: AuthDetector) -> None:
+        self._interface = interface
+        self._cli_status = cli_status
+        self._auth = auth
 
     async def detect(self) -> ConnectionInfo:
-        primary = await self._primary.detect()
-        if primary.state is not ConnState.CONNECTED:
-            return primary
-        # Enrich with CLI metadata; do not let CLI failure flip us to disconnected.
-        secondary = await self._secondary.detect()
+        auth_task = asyncio.create_task(self._auth.probe())
+        iface_info = await self._interface.detect()
+        auth_state, email = await auth_task
+
+        if iface_info.state is not ConnState.CONNECTED:
+            return ConnectionInfo(
+                state=iface_info.state,
+                auth=auth_state,
+                account_email=email,
+                error=iface_info.error,
+            )
+        # Connected per kernel — enrich via `status`. Treat enrichment
+        # failure as non-fatal: we stay CONNECTED with bare-bones info.
+        secondary = await self._cli_status.detect()
         if secondary.state is ConnState.CONNECTED:
             return ConnectionInfo(
                 state=ConnState.CONNECTED,
-                interface=primary.interface,
+                auth=auth_state,
+                account_email=email,
+                interface=iface_info.interface,
                 server=secondary.server,
                 city=secondary.city,
                 country=secondary.country,
                 protocol=secondary.protocol,
                 load_percent=secondary.load_percent,
             )
-        return primary
+        return ConnectionInfo(
+            state=ConnState.CONNECTED,
+            auth=auth_state,
+            account_email=email,
+            interface=iface_info.interface,
+        )
 
 
 def default_detector(cli: ProtonCLI) -> Detector:
-    return CompositeDetector(InterfaceDetector(), CLIStatusDetector(cli))
+    return CompositeDetector(
+        InterfaceDetector(),
+        CLIStatusDetector(cli),
+        AuthDetector(cli),
+    )

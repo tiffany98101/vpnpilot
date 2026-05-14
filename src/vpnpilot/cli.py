@@ -13,7 +13,7 @@ import re
 import shutil
 from dataclasses import dataclass
 
-from .state import ConnectionInfo, ConnState
+from .state import AuthState, ConnectionInfo, ConnState
 
 DEFAULT_TIMEOUT = 30.0  # seconds; status can take 10s+ on first call after a state change
 PROTONVPN_BIN = "protonvpn"
@@ -125,6 +125,8 @@ _CONNECT_SERVER_LINE = re.compile(
     r"^Connected to\s+(?P<server>\S+)\s+in\s+(?P<city>.+?),\s*(?P<country>.+?)\.\s*$",
     re.MULTILINE,
 )
+_INFO_ACCOUNT_LINE = re.compile(r"^Account:\s*'(?P<account>.+?)'\s*$", re.MULTILINE)
+_AUTH_REQUIRED_RE = re.compile(r"Authentication required", re.IGNORECASE)
 
 
 def parse_status(stdout: str) -> ConnectionInfo:
@@ -167,9 +169,30 @@ def parse_connect_output(stdout: str) -> dict[str, str]:
     return out
 
 
-def is_not_signed_in(result: CLIResult) -> bool:
-    """Heuristic. The CLI's exit code is non-zero and it suggests `signin`."""
+def parse_info(stdout: str) -> tuple[AuthState, str | None]:
+    """Parse `protonvpn info`.
+
+    Returns (auth, email). The CLI prints `Account: 'None'` (literal
+    string None) when signed out, and `Account: '<email>'` when signed
+    in. Exit code is 0 in both cases — see docs/cli-reference.md.
+    """
+    m = _INFO_ACCOUNT_LINE.search(stdout)
+    if not m:
+        return AuthState.UNKNOWN, None
+    value = m.group("account").strip()
+    if value == "None":
+        return AuthState.SIGNED_OUT, None
+    return AuthState.SIGNED_IN, value
+
+
+def is_auth_error(result: CLIResult) -> bool:
+    """True iff a CLI command failed because we're signed out.
+
+    The signal is exit != 0 plus `Authentication required` in stderr
+    (or stdout, defensively). The exact wording varies per command:
+    `Authentication required.`, `Authentication required to view ...`.
+    """
     if result.ok:
         return False
-    blob = (result.stdout + "\n" + result.stderr).lower()
-    return "signin" in blob or "sign in" in blob or "not signed in" in blob
+    blob = result.stderr + "\n" + result.stdout
+    return bool(_AUTH_REQUIRED_RE.search(blob))

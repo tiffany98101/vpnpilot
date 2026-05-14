@@ -1,4 +1,9 @@
-"""Connection state model — shared across detection, CLI, and UI layers."""
+"""Connection state model — shared across detection, CLI, and UI layers.
+
+Auth and connection are orthogonal axes. A ConnectionInfo always carries
+both. UNKNOWN auth means "haven't probed yet" / "probe failed"; UI
+should not flip to a signed-out display on a single UNKNOWN.
+"""
 
 from __future__ import annotations
 
@@ -10,8 +15,12 @@ class ConnState(Enum):
     DISCONNECTED = "disconnected"
     TRANSITIONING = "transitioning"
     CONNECTED = "connected"
-    CLI_MISSING = "cli_missing"
-    NOT_SIGNED_IN = "not_signed_in"
+
+
+class AuthState(Enum):
+    SIGNED_IN = "signed_in"
+    SIGNED_OUT = "signed_out"
+    UNKNOWN = "unknown"  # probe not yet run or transient failure
 
 
 @dataclass(frozen=True)
@@ -19,6 +28,8 @@ class ConnectionInfo:
     """A snapshot of the connection. Fields are None when not applicable."""
 
     state: ConnState
+    auth: AuthState = AuthState.UNKNOWN
+    account_email: str | None = None
     server: str | None = None
     city: str | None = None
     country: str | None = None
