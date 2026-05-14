@@ -68,7 +68,138 @@ to see the IP for a connection that was made outside the app — e.g.
 when vpnpilot is launched into an already-connected state.)
 
 `connect` is **blocking and synchronous** — it returns only after the
-WireGuard tunnel is up. On WG it took ~1.3-2.5s in our tests.
+WireGuard tunnel is up. Across the 12-case capture in
+"Connect surface" below, wall time ranged from **2.5s to 5.7s**, with
+Secure Core consistently slowest. (Earlier ~1.3-2.5s observations were
+from country/city only; this is the full range.)
+
+See "Connect surface" below for the empirical surface of every flag
+and combination.
+
+## Connect surface
+
+Empirically captured on 2026-05-14 against `proton-vpn-cli 1.0.1`.
+Each case below was preceded by `protonvpn disconnect` to reach a
+known baseline. All twelve cases produced **exit 0 with empty
+stderr**.
+
+### Options surface
+
+`protonvpn connect [OPTIONS] [SERVER_NAME]` — see the table near the
+top of this doc for the option list. Combinations of `--country` with
+exactly one of `{--p2p, --securecore, --tor, --random}` are valid
+(cases #04-#07). Combinations between `--p2p`/`--securecore`/`--tor`
+were **not** tested and may collide (each names a distinct server
+pool); the preset UI should treat them as mutually exclusive. `--random`
+appears orthogonal to the modifier flags and to `--country`/`--city`.
+
+### Standard success output
+
+For everything except Secure Core the CLI prints:
+
+```
+Connected to <SERVER_ID> in <city>, <country>.
+Your new IP address is <ip>.
+```
+
+For Secure Core the second component of the location is the
+**exit-country prefix** instead of the destination country:
+
+```
+Connected to SE-US#1 in New York, via Sweden.
+```
+
+`protonvpn status` mirrors this in the `Server:` line:
+
+```
+Server: SE-US#1 in New York, via Sweden
+```
+
+Parsers must accept both `, <country>.` and `, via <country>.` as
+valid terminators of the location clause.
+
+### Captures (all exit 0, empty stderr)
+
+| # | Command                              | Selected server          | Wall  |
+| - | ------------------------------------ | ------------------------ | ----- |
+| 01| `connect --country US`               | US-WA#187 / Seattle      | 2.5s  |
+| 02| `connect --city Seattle`             | US-WA#187 / Seattle      | 3.1s  |
+| 03| `connect US-WA#187` (positional)     | US-WA#187 / Seattle      | 2.9s  |
+| 04| `connect --country US --p2p`         | US-WA#298 / Seattle      | 3.2s  |
+| 05| `connect --country US --tor`         | US-GA#29-TOR / Atlanta   | 3.4s  |
+| 06| `connect --country US --securecore`  | SE-US#1 / NY via Sweden  | 4.8s  |
+| 07| `connect --country US --random`      | US-IL#754 / Chicago      | 3.3s  |
+| 08| `connect` (no args)                  | US-WA#187 / Seattle      | 3.4s  |
+| 09| `connect --p2p`                      | US-WA#298 / Seattle      | 3.4s  |
+| 10| `connect --securecore`               | IS-CA#1 / Montréal via IS| 5.7s  |
+| 11| `connect --tor`                      | US-GA#29-TOR / Atlanta   | 3.0s  |
+| 12| `connect --random`                   | US-CA#424 / San Jose     | 3.4s  |
+
+Observations from the table:
+
+- Bare `connect` and `connect --country US` both landed on
+  `US-WA#187` here — "fastest globally" appears to be
+  "fastest-near-client", not a worldwide selection.
+- `--p2p` alone (case #09) gave the same server as
+  `--country US --p2p` (case #04). When the fastest P2P server is
+  already local, the `--country` constraint is a no-op.
+- `--tor` and `--country US --tor` both landed in Atlanta — Tor is
+  exposed on a small US-East subset (per `cities list US`, only
+  Atlanta and Denver advertise the Tor feature).
+- `--securecore` alone routed through Iceland; the `--country US`
+  version forces the destination side to US (New York). Secure Core
+  is the only flag observed to change the *visible* exit country.
+
+### Server ID format variants
+
+| Variant     | Example         | Pattern                              |
+| ----------- | --------------- | ------------------------------------ |
+| Standard    | `US-WA#187`     | `<country>-<state>#<n>`              |
+| Tor         | `US-GA#29-TOR`  | `<country>-<state>#<n>-TOR`          |
+| Secure Core | `SE-US#1`       | `<exit-country>-<dest-country>#<n>`  |
+
+For Secure Core the two segments swap meaning: the first segment is
+the *exit* (visible) country and the second is the destination, the
+opposite of standard. A regex that only handles the standard pattern
+will misread Secure Core IDs.
+
+### Interface behavior
+
+All 12 cases produced a `proton0` with
+`<POINTOPOINT,NOARP,UP,LOWER_UP>` flags, exactly as documented in
+"Network interface behavior". Interface index incremented
+monotonically (9, 12, 15, 19, 22, 25, 28, 31, 35, 38, 41, 44) across
+the captures — never reused, confirming the existing observation.
+
+`ipv6leakintrf0` was observed in **10 of 12** captures. The two
+exceptions (#03, #08) showed only `proton0` at the polling moment —
+consistent with the existing "`ipv6leakintrf0` may appear slightly
+after `proton0`" note. The interface predicate `^proton\d+$` UP is
+unchanged.
+
+### Implication for the preset model
+
+The preset schema reduces to:
+
+- **Target kind**: `none` | `country` | `city` | `server_id`
+  (no `fastest` or `random` kind — "fastest" is the absence of a
+  target, and `random` is a flag.)
+- **Modifier flags**: at most one of `{p2p, secure_core, tor}` plus
+  optional `random`.
+
+Argv construction (matches the captured invocations exactly):
+
+```
+argv = ["protonvpn", "connect"]
+if flags.p2p:         argv += ["--p2p"]
+if flags.secure_core: argv += ["--securecore"]   # one word, no dash
+if flags.tor:         argv += ["--tor"]
+if flags.random:      argv += ["--random"]
+if target.kind == "country":  argv += ["--country", target.value]
+elif target.kind == "city":   argv += ["--city", target.value]
+elif target.kind == "server_id": argv += [target.value]
+# target.kind == "none" → no target argument
+```
 
 ## disconnect
 
