@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -18,6 +19,8 @@ from .detect import Detector
 from .preset import PresetStore, preset_to_connect_kwargs
 from .state import AuthState, ConnectionInfo, ConnState
 from .user_state import NullPersistence, Persistence
+
+_SERVER_ID_RE = re.compile(r"^[A-Z]{2}(-[A-Z]{2,3})?#\d+(-TOR)?$")
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +81,36 @@ class Controller(QObject):
             self.error_occurred.emit("Preset not found.")
             return
         self._spawn(self._do_connect(**preset_to_connect_kwargs(preset)))
+
+    def connect_to_location(self, country_code: str, city: str | None = None) -> None:
+        """Connect to a specific country or city.
+
+        Routes through the same _do_connect path as connect_preset.
+        Gated on auth state — no-ops with error signal when signed out.
+        """
+        if self._current.auth is AuthState.SIGNED_OUT:
+            self.error_occurred.emit("Sign in to ProtonVPN first.")
+            return
+        if city:
+            self._spawn(self._do_connect(city=city))
+        else:
+            self._spawn(self._do_connect(country=country_code))
+
+    def connect_to_server_id(self, server_id: str) -> None:
+        """Connect to a specific server by ID (e.g. US-WA#187, US-GA#29-TOR).
+
+        Normalises the ID to uppercase, validates against the server-ID regex
+        from docs/cli-reference.md, and raises ValueError on mismatch so the
+        caller can surface a client-side error without a round-trip.
+        Gated on auth state — no-ops with error signal when signed out.
+        """
+        if self._current.auth is AuthState.SIGNED_OUT:
+            self.error_occurred.emit("Sign in to ProtonVPN first.")
+            return
+        normalized = server_id.strip().upper()
+        if not _SERVER_ID_RE.match(normalized):
+            raise ValueError(f"Invalid server ID: {server_id!r}")
+        self._spawn(self._do_connect(server_id=normalized))
 
     def disconnect(self) -> None:
         self._spawn(self._do_disconnect())

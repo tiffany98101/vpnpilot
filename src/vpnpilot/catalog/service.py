@@ -116,6 +116,34 @@ class ServerCatalog(QObject):
                 self._prewarm_loop(), name="vpnpilot-catalog-prewarm"
             )
 
+    def countries_if_ready(self) -> list[Country] | None:
+        """Return the cached countries list without triggering a fetch.
+
+        Returns None if the countries list hasn't been fetched yet.
+        Safe to call from any context without side effects.
+        """
+        return self._countries
+
+    def cities_if_loaded(self, country_code: str) -> list[City] | None:
+        """Return cities for country_code if already LOADED, None otherwise.
+
+        Does not trigger a fetch. Use cities() or cities_async() to request data.
+        """
+        entry = self._entries.get(country_code.upper())
+        if entry is not None and entry.state is EntryState.LOADED:
+            return entry.cities
+        return None
+
+    def entry_state(self, country_code: str) -> EntryState:
+        """Return the current EntryState for country_code without triggering a fetch."""
+        entry = self._entries.get(country_code.upper())
+        return entry.state if entry is not None else EntryState.NOT_FETCHED
+
+    def entry_error(self, country_code: str) -> str | None:
+        """Return the last fetch error for country_code, or None."""
+        entry = self._entries.get(country_code.upper())
+        return entry.last_error if entry is not None else None
+
     def refresh(self) -> None:
         """Drop the cache and allow a fresh fetch on next access."""
         self._countries = None

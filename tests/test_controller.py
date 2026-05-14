@@ -257,6 +257,117 @@ async def test_connect_preset_without_store_emits_error(qapp):
     assert errors and "preset" in errors[0].lower()
 
 
+@pytest.mark.parametrize(
+    "country_code, city, expected_kwargs",
+    [
+        ("DE", None, {"country": "DE"}),
+        ("US", "Seattle", {"city": "Seattle"}),
+        ("GB", "London", {"city": "London"}),
+    ],
+)
+@pytest.mark.asyncio
+async def test_connect_to_location_routes_to_cli(qapp, country_code, city, expected_kwargs):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    ctrl = Controller(cli, detector)
+
+    ctrl.connect_to_location(country_code, city)
+    for _ in range(20):
+        await asyncio.sleep(0.01)
+        if ctrl._in_flight and ctrl._in_flight.done():
+            break
+
+    assert cli.connect_calls == [expected_kwargs]
+
+
+@pytest.mark.asyncio
+async def test_connect_to_location_blocked_when_signed_out(qapp):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(
+        answers=[ConnectionInfo(state=ConnState.DISCONNECTED, auth=AuthState.SIGNED_OUT)]
+    )
+    ctrl = Controller(cli, detector)
+    errors: list[str] = []
+    ctrl.error_occurred.connect(errors.append)
+    await ctrl._refresh_state()
+
+    ctrl.connect_to_location("DE", None)
+    await asyncio.sleep(0.02)
+    assert cli.connect_calls == []
+    assert errors and "sign in" in errors[0].lower()
+
+
+@pytest.mark.parametrize(
+    "server_id, expected_kwarg",
+    [
+        ("US-WA#187", {"server_id": "US-WA#187"}),
+        ("IT#23", {"server_id": "IT#23"}),
+        ("US-GA#29-TOR", {"server_id": "US-GA#29-TOR"}),
+        ("SE-US#1", {"server_id": "SE-US#1"}),
+        ("us-wa#187", {"server_id": "US-WA#187"}),  # normalised to uppercase
+    ],
+)
+@pytest.mark.asyncio
+async def test_connect_to_server_id_valid(qapp, server_id, expected_kwarg):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    ctrl = Controller(cli, detector)
+
+    ctrl.connect_to_server_id(server_id)
+    for _ in range(20):
+        await asyncio.sleep(0.01)
+        if ctrl._in_flight and ctrl._in_flight.done():
+            break
+
+    assert cli.connect_calls == [expected_kwarg]
+
+
+@pytest.mark.parametrize(
+    "bad_id",
+    ["INVALID", "US#", "US-WA-187", "US-WA#187-INVALID", "#123", ""],
+)
+def test_connect_to_server_id_invalid_raises(qapp, bad_id):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    ctrl = Controller(cli, detector)
+
+    with pytest.raises(ValueError):
+        ctrl.connect_to_server_id(bad_id)
+    assert cli.connect_calls == []
+
+
+@pytest.mark.asyncio
+async def test_connect_to_server_id_blocked_when_signed_out(qapp):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(
+        answers=[ConnectionInfo(state=ConnState.DISCONNECTED, auth=AuthState.SIGNED_OUT)]
+    )
+    ctrl = Controller(cli, detector)
+    errors: list[str] = []
+    ctrl.error_occurred.connect(errors.append)
+    await ctrl._refresh_state()
+
+    ctrl.connect_to_server_id("US-WA#187")
+    await asyncio.sleep(0.02)
+    assert cli.connect_calls == []
+    assert errors and "sign in" in errors[0].lower()
+
+
 @pytest.mark.asyncio
 async def test_duplicate_command_while_in_flight_is_ignored(qapp, tmp_path):
     slow_cli = ScriptedCLI(
