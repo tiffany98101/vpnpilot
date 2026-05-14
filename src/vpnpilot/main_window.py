@@ -15,6 +15,7 @@ from importlib.resources import files
 from PyQt6.QtCore import QAbstractListModel, QModelIndex, Qt
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -29,6 +30,7 @@ from PyQt6.QtWidgets import (
 from . import APP_NAME
 from .controller import Controller
 from .preset import Preset, PresetStore, PresetTarget, TargetKind
+from .preset_editor import PresetEditorDialog
 from .state import AuthState, ConnectionInfo, ConnState
 
 log = logging.getLogger(__name__)
@@ -445,17 +447,27 @@ class MainWindow(QMainWindow):
         self._controller.connect_preset(preset.id)
 
     def _on_preset_edit(self, preset: Preset) -> None:
-        # Real editor dialog lands in the next slice.
-        QMessageBox.information(
-            self,
-            "Edit preset",
-            f"Editing presets is coming in the next slice (would edit “{preset.name}”).",
-        )
+        taken = {p.name for p in self._preset_store.list_all() if p.id != preset.id}
+        dlg = PresetEditorDialog(preset=preset, taken_names=taken, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        name, target, flags = dlg.values()
+        try:
+            self._preset_store.update(preset.id, name=name, target=target, flags=flags)
+        except ValueError as e:
+            QMessageBox.warning(self, "Could not save preset", str(e))
+            return
+        self.preset_panel.refresh()
 
     def _on_preset_new(self) -> None:
-        # Real editor dialog lands in the next slice.
-        QMessageBox.information(
-            self,
-            "New preset",
-            "Creating presets is coming in the next slice.",
-        )
+        taken = {p.name for p in self._preset_store.list_all()}
+        dlg = PresetEditorDialog(preset=None, taken_names=taken, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        name, target, flags = dlg.values()
+        try:
+            self._preset_store.add(name=name, target=target, flags=flags)
+        except ValueError as e:
+            QMessageBox.warning(self, "Could not create preset", str(e))
+            return
+        self.preset_panel.refresh()
