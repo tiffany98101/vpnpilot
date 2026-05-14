@@ -157,9 +157,100 @@ $ protonvpn info
 Account: 'tiffany.vonarnim@gmail.com'
 ```
 
-Single line. If not signed in the CLI returns an error (exit code
-non-zero) suggesting `protonvpn signin`. vpnpilot treats the latter
-as the trigger for the "Not signed in" panel.
+Single line. Exit code is **0** in both signed-in and signed-out
+cases — see "Unauthenticated state" below. `info` is the canonical
+auth-state probe.
+
+## Unauthenticated state
+
+Captured on 2026-05-13 after `protonvpn signout`, before signing back
+in. Connection state was DISCONNECTED throughout. Auth state and
+connection state are **orthogonal axes** — the CLI does not collapse
+them into one signal.
+
+### `info` (the canonical auth probe)
+
+```
+$ protonvpn signout
+You have been successfully signed out.   # exit 0
+$ protonvpn info
+Account: 'None'                          # exit 0
+```
+
+Note: exit is **0** even when signed out. The discriminator is the
+quoted account value: `'None'` ⇔ signed out, anything else ⇔ signed
+in (and the value is the user's email). Regex:
+`^Account:\s*'(?P<account>.+?)'\s*$` — then `account == "None"` means
+signed-out.
+
+### `status` (signed out)
+
+```
+$ protonvpn status
+Status: Disconnected                     # exit 0
+```
+
+**Indistinguishable** from signed-in-but-disconnected. Do not use
+`status` to detect auth.
+
+### `connect` (signed out)
+
+```
+$ protonvpn connect --city Seattle
+Server list is outdated, updating... This may take a moment.   # stdout
+                                                               # exit 2, stderr:
+Error: Authentication required.Please sign in with 'protonvpn signin' before connecting.
+
+Try 'protonvpn connect --help' for more information.
+```
+
+Verbatim "Authentication required." (note: no space before "Please"
+— that's the CLI's bug, not a typo here). Substring
+`"Authentication required"` (case-insensitive) in stderr is the
+reliable signal.
+
+### `countries list` (signed out)
+
+```
+$ protonvpn countries list                                     # exit 2, stderr:
+Error: Authentication required to view complete country list. Please sign in with 'protonvpn signin'
+```
+
+Same `"Authentication required"` substring.
+
+### `config list` (signed out)
+
+```
+$ protonvpn config list                                        # exit 2, stderr:
+Error: Authentication required to view feature status. Please sign in with 'protonvpn signin'
+```
+
+Same pattern.
+
+### `disconnect` (signed out)
+
+```
+$ protonvpn disconnect
+Disconnected.                            # exit 0
+```
+
+Always succeeds, even with no session.
+
+### Implication for the detector
+
+vpnpilot's detection layer treats **auth** and **connection** as
+orthogonal axes:
+
+| `info` says        | `proton\d+` interface | → state                          |
+| ------------------ | --------------------- | -------------------------------- |
+| `Account: 'None'`  | absent                | SIGNED_OUT + DISCONNECTED        |
+| `Account: 'email'` | absent                | SIGNED_IN + DISCONNECTED         |
+| `Account: 'email'` | present (UP)          | SIGNED_IN + CONNECTED            |
+| `info` fails/timeout | (any)               | UNKNOWN (don't override prior)   |
+
+(The fourth row — `'None'` while an interface is up — should be
+impossible in practice; if observed, log a warning and treat as
+SIGNED_OUT + CONNECTED, since the kernel doesn't lie.)
 
 ## servers / countries / cities
 

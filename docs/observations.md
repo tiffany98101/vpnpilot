@@ -99,3 +99,51 @@ after CLI restart or state change:
 ```
 Server list is outdated, updating... This may take a moment.
 ```
+
+## Unauthenticated capture run
+
+Run on 2026-05-13 after `protonvpn signout`.
+
+```
+$ protonvpn signout
+You have been successfully signed out.   # exit 0
+
+$ protonvpn status
+Status: Disconnected                     # exit 0
+
+$ protonvpn info
+Account: 'None'                          # exit 0
+
+$ protonvpn connect --city Seattle       # exit 2
+[stdout] Server list is outdated, updating... This may take a moment.
+[stderr] Error: Authentication required.Please sign in with 'protonvpn signin' before connecting.
+[stderr]
+[stderr] Try 'protonvpn connect --help' for more information.
+
+$ protonvpn countries list               # exit 2
+[stdout] Server list is outdated, updating... This may take a moment.
+[stderr] Error: Authentication required to view complete country list. Please sign in with 'protonvpn signin'
+[stderr]
+[stderr] Try 'protonvpn countries list --help' for more information.
+
+$ protonvpn disconnect                   # exit 0
+Disconnected.
+
+$ protonvpn config list                  # exit 2
+[stderr] Error: Authentication required to view feature status. Please sign in with 'protonvpn signin'
+[stderr]
+[stderr] Try 'protonvpn config list --help' for more information.
+```
+
+Key observations:
+
+1. `protonvpn info` returns **exit 0** even when signed out, with
+   stdout `Account: 'None'`. The literal string `'None'` is the
+   signed-out marker.
+2. `protonvpn status` is identical to signed-in-disconnected; cannot
+   be used to detect auth.
+3. Operational commands (`connect`, `countries list`, `config list`)
+   exit 2 with stderr containing `Authentication required` (the exact
+   wording varies per command — sometimes "Authentication required.",
+   sometimes "Authentication required to view ...").
+4. `disconnect` is idempotent and succeeds even with no session.
