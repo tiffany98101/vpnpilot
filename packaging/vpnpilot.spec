@@ -1,5 +1,5 @@
 Name:           vpnpilot
-Version:        0.2.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Unofficial tray UI for the ProtonVPN CLI
 
@@ -66,6 +66,10 @@ install -Dm0644 src/vpnpilot/resources/icon-app.svg \
 %{_datadir}/icons/hicolor/scalable/apps/vpnpilot.svg
 
 %changelog
+* Wed May 13 2026 Tiffany von Arnim <tiffany.vonarnim@gmail.com> - 0.2.1-1
+- Single-instance lock (fcntl.flock on $XDG_RUNTIME_DIR/vpnpilot.lock).
+  Prevents duplicate tray icons when launched twice.
+
 * Wed May 13 2026 Tiffany von Arnim <tiffany.vonarnim@gmail.com> - 0.2.0-1
 - Sign-in detection: orthogonal AuthState axis on ConnectionInfo,
   signed-out tray icon, sign-in panel (modeless, Copy + auto-recheck),

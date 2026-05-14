@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import signal
+import subprocess
 import sys
 from importlib.resources import files
 
@@ -13,6 +15,7 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from . import APP_NAME
 from ._qasync_shim import QEventLoop
+from ._singleton import SingletonLock
 from .cli import ProtonCLI
 from .controller import Controller
 from .detect import default_detector
@@ -42,11 +45,30 @@ def _show_cli_missing(parent_app: QApplication) -> int:
     return 1
 
 
+def _notify_already_running(pid: int | None) -> None:
+    msg = (
+        f"vpnpilot is already running (pid {pid})."
+        if pid
+        else "vpnpilot is already running."
+    )
+    print(msg, file=sys.stderr)
+    if shutil.which("notify-send"):
+        subprocess.run(["notify-send", APP_NAME, msg], check=False)
+
+
 def main() -> int:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
+    # Held for the life of this process — if released too early a second
+    # launch could slip in. The local binding keeps the file descriptor
+    # alive.
+    lock = SingletonLock()
+    if not lock.acquire():
+        _notify_already_running(lock.held_by_pid())
+        return 0
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
