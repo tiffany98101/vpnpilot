@@ -498,6 +498,77 @@ Stdout is empty. The catalog service marks the entry as `FAILED` with
 The CLI normalises the code internally. vpnpilot always passes uppercase
 codes to avoid relying on this, but the normalisation is a safety net.
 
+### Feature vocabulary
+
+Captured on 2026-05-14 by running:
+
+```
+vpnpilot catalog dump | jq '[.countries[].cities[].features[]?] | unique'
+```
+
+Result (complete set as of proton-vpn-cli 1.0.1):
+
+```json
+["P2P", "Tor"]
+```
+
+`P2P` — P2P-optimised server. `Tor` — Tor-over-VPN server (initial cap,
+not all-caps). Only two values observed. The parser silently ignores
+unknown future values via `contextlib.suppress(ValueError)` on the
+`CityFeature` enum.
+
+### Pseudo-entries
+
+All 145 countries returned by `countries list` are genuine geographic
+locations (ISO 3166-1 alpha-2 or equivalent). No "Fastest in X",
+"Fastest", grouped-region, or virtual-location entries were found.
+
+Notable edge cases that are treated as normal countries by the CLI:
+`Hong Kong (HK)`, `Macao (MO)`, `Puerto Rico (PR)`, `Greenland (GL)`,
+`Palestinian Territory (PS)`, `Taiwan (TW)`. All have city lists
+structured identically to sovereign-state entries — no special-casing
+required.
+
+### Server ID format
+
+From observed `status`, `connect`, and `cities list` output:
+
+| Variant     | Example       | Notes                                             |
+| ----------- | ------------- | ------------------------------------------------- |
+| Standard    | `US-WA#187`   | Country code + state/region code + number         |
+| Country-only| `IT#23`       | No state/region component                         |
+| Tor         | `US-GA#29-TOR`| `-TOR` suffix appended                            |
+| Secure Core | `SE-US#1`     | Two country codes; first is exit, second is dest  |
+
+Validation regex (accept user input after `.strip().upper()`):
+
+```
+^[A-Z]{2}(-[A-Z]{2,3})?#\d+(-TOR)?$
+```
+
+This accepts all four variants above. The two-letter prefix is always a
+country code; the optional `(-[A-Z]{2,3})` is a state abbreviation (e.g.
+`WA`, `GA`) or a second country code (Secure Core). `-TOR` is the only
+observed suffix.
+
+### Connect arg translation
+
+`preset_to_connect_kwargs()` in `preset.py` is the canonical standalone
+helper that maps `Preset.target` + `Preset.flags` to
+`ProtonCLI.connect()` kwargs. The browser widget's
+`connect_to_location()` and `connect_to_server_id()` on the controller
+route through the same `_do_connect(**kwargs)` path — no separate
+argv-construction logic exists.
+
+Argv construction summary (see `preset.py` for authoritative version):
+
+```python
+if city:    kwargs = {"city": city}
+elif country: kwargs = {"country": country}
+elif server_id: kwargs = {"server_id": server_id}
+# flags: p2p=True, secure_core=True, tor=True, random_server=True
+```
+
 ### Catalog when signed out
 
 `countries list` exits 2 with the same "Authentication required" error
