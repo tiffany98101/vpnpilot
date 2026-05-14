@@ -1,5 +1,5 @@
 Name:           vpnpilot
-Version:        0.4.0
+Version:        0.5.0
 Release:        1%{?dist}
 Summary:        Unofficial tray UI for the ProtonVPN CLI
 
@@ -66,6 +66,20 @@ install -Dm0644 src/vpnpilot/resources/icon-app.svg \
 %{_datadir}/icons/hicolor/scalable/apps/vpnpilot.svg
 
 %changelog
+* Thu May 14 2026 Tiffany von Arnim <tiffany.vonarnim@gmail.com> - 0.5.0-1
+- Server browser UI (BrowseTab): two-pane country/city view in main window,
+  backed by ServerCatalog. Countries pane with text filter and state glyphs;
+  cities pane with feature badges (P2P, Tor); server-ID escape hatch; Refresh
+  button; signed-out degradation. Browse tab is secondary to the preset list.
+- Preset editor graduation: Country and City fields become editable QComboBox
+  backed by catalog data when catalog is available. Free-text fallback always
+  allowed. Loading existing presets pre-selects by code; unknown values shown
+  as free-text without data loss.
+- Controller: connect_to_location(country_code, city=None) and
+  connect_to_server_id(server_id) with server-ID regex validation.
+- Catalog: non-triggering accessors (countries_if_ready, cities_if_loaded,
+  entry_state, entry_error) for read-only UI access without side effects.
+
 * Thu May 14 2026 Tiffany von Arnim <tiffany.vonarnim@gmail.com> - 0.4.0-1
 - In-memory server catalog (vpnpilot.catalog): lazy country + city fetch
   from the protonvpn CLI, background prewarm (sequential, one country at

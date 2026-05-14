@@ -14,13 +14,15 @@ which handles polkit itself.
 Current scope: tray icon with four UI states (connected, disconnected,
 transitioning, signed-out), state detection on two orthogonal axes
 (connection + auth), modeless Sign-in panel, **modeless main window**
-with status panel + preset list + disconnect footer, a
-**user-editable preset library** seeded with a Seattle entry on first
-run, and an in-memory **server catalog** (country + city list from the
-CLI, lazy-fetch + background prewarm, `vpnpilot catalog dump` diagnostic
-command). The tray's connect section is dynamic — top entry is the
-default preset, a "Connect to…" submenu lists the rest. No settings UI,
-server browser UI, or event log yet.
+with status panel + tabbed panel (Presets | Browse) + disconnect footer,
+a **user-editable preset library** seeded with a Seattle entry on first
+run, an in-memory **server catalog** (country + city list from the CLI,
+lazy-fetch + background prewarm, `vpnpilot catalog dump` diagnostic
+command), and a **server browser tab** (two-pane country/city view with
+filters, feature badges, server-ID escape hatch). Preset editor Country
+and City fields are now catalog-backed editable comboboxes. The tray's
+connect section is dynamic — top entry is the default preset, a
+"Connect to…" submenu lists the rest. No settings UI or event log yet.
 
 ## Hard constraints
 
@@ -86,15 +88,20 @@ server browser UI, or event log yet.
                 │   └──────────────────┘                  │  │ ServerCatalog  │
                 ▼                                         │  │ (QObject,      │
         vpnpilot.main_window ─────────────────────────────┤  │  lazy-fetch +  │
-        ┌──────────────────────────────┐                  │  │  prewarm,      │
-        │ StatusPanel (state, server,  │                  │  │  catalog_changed│
-        │   protocol, auth indicator)  │                  │  │  signal)       │
-        │ PresetListPanel (QListView + │──── PresetStore ─┘  └────────────────┘
-        │   Connect/Edit/Delete/New/   │
-        │   Set-Default + uses Preset- │
-        │   EditorDialog)              │
-        │ Disconnect footer            │
-        └──────────────────────────────┘
+        ┌──────────────────────────────────────────┐      │  │  prewarm,      │
+        │ StatusPanel (state, server, protocol,    │      │  │  catalog_changed│
+        │   auth indicator)                        │      │  │  signal,       │
+        │ QTabWidget:                              │      │  │  non-triggering│
+        │   "Presets" tab:                         │      │  │  accessors)    │
+        │     PresetListPanel (QListView +         │      │  └────────────────┘
+        │       Connect/Edit/Delete/New/Set-Default│      │         ▲
+        │       + uses PresetEditorDialog)         │──PresetStore   │
+        │   "Browse" tab:                          │      │         │
+        │     BrowseTab (vpnpilot.browser) ────────┼──────┘  (catalog)
+        │       countries pane + cities pane +     │
+        │       server-ID field + Refresh btn      │
+        │ Disconnect footer                        │
+        └──────────────────────────────────────────┘
                 ▲
                 │ instantiated by tray on left-click
                 │ or "Open VPNPilot…" menu item
@@ -116,6 +123,11 @@ Module roles:
   polling loop, owns the "in-flight command" guard, emits Qt signals.
   `connect_preset(preset_id)` looks up via injected `PresetStore`,
   translates target/flags into CLI kwargs (see `preset_to_connect_kwargs`).
+  `connect_to_location(country_code, city=None)` and
+  `connect_to_server_id(server_id)` are the browser's connect paths;
+  they route through the same `_do_connect(**kwargs)` path. Server IDs
+  are validated against `^[A-Z]{2}(-[A-Z]{2,3})?#\d+(-TOR)?$` before
+  shelling out (`connect_to_server_id` raises `ValueError` on mismatch).
 - `preset.py` — `Preset` dataclass, `PresetStore` (JSON-backed list with
   the invariants `len >= 1`, exactly one `is_default`, unique names).
   Pure Python, no Qt. Translates to CLI kwargs at the boundary.
@@ -126,16 +138,29 @@ Module roles:
   "Connect to…" submenu. Left-click on the tray icon opens
   `MainWindow`. Auth-state takes priority over connection-state in
   the render switch — see "Auth axis" below.
-- `main_window.py` — modeless `MainWindow` (status panel + preset list
-  panel + disconnect footer). `PresetListModel` is a `QAbstractListModel`
-  over the store. `PresetListPanel` owns the list view and the action
-  buttons; the panel takes action callbacks at construction so it
+- `main_window.py` — modeless `MainWindow` (status panel + `QTabWidget`
+  ["Presets" | "Browse"] + disconnect footer). `PresetListModel` is a
+  `QAbstractListModel` over the store. `PresetListPanel` owns the list
+  view and action buttons; takes action callbacks at construction so it
   doesn't depend on `Controller` or `PresetEditorDialog` directly.
+  The Browse tab is `BrowseTab` from `browser.py` — added only when
+  catalog is provided (always in the full app, optional in tests).
   Hide-on-close so reopen is cheap.
+- `browser.py` — `BrowseTab(QWidget)`: catalog-backed two-pane country/
+  city view. **Secondary discovery path — presets are still the primary
+  daily-use connect surface.** `CountryListModel` / `CityListModel` are
+  `QAbstractListModel` implementations; `QSortFilterProxyModel` handles
+  both pane filters. Widget never awaits catalog coroutines — schedules
+  tasks via `asyncio.get_running_loop().create_task()` and reacts to
+  `catalog_changed` signals for incremental updates. Signed-out state
+  shown via `QStackedWidget` (auth page / normal page).
 - `preset_editor.py` — modal `PresetEditorDialog` for both New… and
-  Edit…. Storage-agnostic: takes the existing `Preset | None` plus a
-  set of taken names, returns the validated `(name, target, flags)`
-  tuple on accept. Caller persists via `PresetStore`.
+  Edit…. Storage-agnostic: takes the existing `Preset | None`, a set of
+  taken names, and an optional `catalog`. Without catalog, behavior is
+  identical to previous slices. With catalog, Country and City fields are
+  editable `QComboBox` backed by `catalog.countries_if_ready()` and
+  `catalog.cities_if_loaded()`; free-text always accepted as fallback.
+  Caller persists via `PresetStore`.
 - `signin_panel.py` — modeless `SignInPanel(QDialog)` shown when the
   user clicks the tray's "Sign in…" item. Knows nothing about the CLI
   or asyncio — takes `on_recheck` callable and a `state_signal`,
@@ -152,9 +177,11 @@ Module roles:
   sync tests). `prewarm()` walks all countries sequentially (one at a time —
   see "Prewarm timing" below). `refresh()` drops all cached state.
   `catalog_changed(country_code)` signal notifies listeners of state transitions.
-  `catalog/_cli.py` implements `vpnpilot catalog dump` (JSON to stdout, requires
-  a QCoreApplication). Parsers live in `catalog/parser.py`; models in
-  `catalog/models.py` — no Qt, no subprocess calls.
+  Non-triggering read-only accessors: `countries_if_ready()`, `cities_if_loaded(code)`,
+  `entry_state(code)`, `entry_error(code)` — used by the browser and preset editor
+  to read cached data without side effects. `catalog/_cli.py` implements
+  `vpnpilot catalog dump` (JSON to stdout, requires a QCoreApplication). Parsers
+  live in `catalog/parser.py`; models in `catalog/models.py` — no Qt, no subprocess.
 - `app.py` — bootstrap: QApplication + qasync event loop + DI.
 - `_qasync_shim.py` — prefers system-installed `qasync`, falls back to
   the vendored copy under `_vendor/qasync`.
@@ -380,11 +407,14 @@ file is at `/usr/share/applications/vpnpilot.desktop`; icon at
   on transition into CONNECTED, compute `now - t0`).
 - Public-IP display in the status panel (the `connect` line is already
   parsed; the wire-up to the status panel hasn't landed).
-- Country/city server browser UI. The catalog data layer exists
-  (`vpnpilot.catalog`); the browser widget and preset-editor picker
-  integration still need to be built.
-- City autocomplete / picker in the preset editor (catalog is ready;
-  just needs wiring into `PresetEditorDialog`).
+- Feature filter chips in the browser cities pane (badges are read-only;
+  filtering by P2P/Tor not yet wired).
+- Right-click "Save as Preset" from the browser (drag-from-browser-to-presets
+  is also not built).
+- Favorites / recently-used in the browser.
+- City filter in preset editor's city combobox (the combobox is editable but
+  has no filter proxy; typing filters are handled by QComboBox's built-in
+  completion rather than a separate QSortFilterProxyModel).
 - Settings UI (kill-switch toggle, autoconnect, start-minimized,
   preferred preset, public-IP endpoint).
 - Auto-connect on login (XDG autostart with `--autoconnect`).
