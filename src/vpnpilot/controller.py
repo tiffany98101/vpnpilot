@@ -15,6 +15,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from .cli import ProtonCLI
 from .detect import Detector
+from .preset import PresetStore, preset_to_connect_kwargs
 from .state import AuthState, ConnectionInfo, ConnState
 from .user_state import NullPersistence, Persistence
 
@@ -32,12 +33,14 @@ class Controller(QObject):
         *,
         poll_interval: float = 3.0,
         persistence: Persistence | None = None,
+        preset_store: PresetStore | None = None,
     ) -> None:
         super().__init__()
         self._cli = cli
         self._detector = detector
         self._poll_interval = poll_interval
         self._persistence = persistence or NullPersistence()
+        self._preset_store = preset_store
         self._current = ConnectionInfo(state=ConnState.DISCONNECTED)
         self._in_flight: asyncio.Task | None = None
         self._poll_task: asyncio.Task | None = None
@@ -58,12 +61,27 @@ class Controller(QObject):
 
     # ----- public actions -----
 
-    def connect_preset_seattle(self) -> None:
+    def connect_preset(self, preset_id: str) -> None:
         # Gate on auth: connect fails noisily at the CLI when signed out,
         # so prevent the round-trip and emit a clear in-app error instead.
         # Disconnect is intentionally not gated — it works even with no
         # session, and we want it available as a recovery path if our
         # detection is somehow wrong.
+        if self._current.auth is AuthState.SIGNED_OUT:
+            self.error_occurred.emit("Sign in to ProtonVPN first.")
+            return
+        if self._preset_store is None:
+            self.error_occurred.emit("No presets configured.")
+            return
+        preset = self._preset_store.get(preset_id)
+        if preset is None:
+            self.error_occurred.emit("Preset not found.")
+            return
+        self._spawn(self._do_connect(**preset_to_connect_kwargs(preset)))
+
+    def connect_preset_seattle(self) -> None:
+        # Legacy hardcoded entry — preserved until the tray's dynamic
+        # preset menu lands. Same gating as connect_preset.
         if self._current.auth is AuthState.SIGNED_OUT:
             self.error_occurred.emit("Sign in to ProtonVPN first.")
             return

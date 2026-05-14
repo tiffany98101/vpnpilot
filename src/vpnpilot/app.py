@@ -19,6 +19,7 @@ from ._singleton import SingletonLock
 from .cli import ProtonCLI
 from .controller import Controller
 from .detect import default_detector
+from .preset import PresetStore
 from .tray import TrayApp, ensure_tray_available
 from .user_state import JsonStateStore
 
@@ -88,7 +89,11 @@ def main() -> int:
     cli = ProtonCLI()
     detector = default_detector(cli)
     store = JsonStateStore()
-    controller = Controller(cli, detector, persistence=store)
+    preset_store = PresetStore()
+    preset_store.load()
+    controller = Controller(
+        cli, detector, persistence=store, preset_store=preset_store
+    )
 
     tray = TrayApp(app, controller, persistence=store)
     tray.show()

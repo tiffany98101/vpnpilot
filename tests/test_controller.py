@@ -11,6 +11,7 @@ from PyQt6.QtCore import QCoreApplication
 from vpnpilot.cli import CLIResult, ProtonCLI
 from vpnpilot.controller import Controller
 from vpnpilot.detect import Detector
+from vpnpilot.preset import PresetFlags, PresetStore, PresetTarget, TargetKind
 from vpnpilot.state import AuthState, ConnectionInfo, ConnState
 
 
@@ -117,7 +118,7 @@ async def test_cli_failure_surfaces_via_error_signal(qapp):
 
 
 @pytest.mark.asyncio
-async def test_connect_preset_blocked_when_signed_out(qapp):
+async def test_legacy_connect_seattle_blocked_when_signed_out(qapp):
     cli = ScriptedCLI(
         connect_result=CLIResult(0, "", ""),
         disconnect_result=CLIResult(0, "", ""),
@@ -158,6 +159,122 @@ async def test_disconnect_not_gated_on_auth_state(qapp):
         if ctrl._in_flight and ctrl._in_flight.done():
             break
     assert cli.disconnect_calls == 1
+
+
+@pytest.mark.parametrize(
+    "target_kind, target_value, flags, expected_kwargs",
+    [
+        (TargetKind.CITY, "Seattle", PresetFlags(), {"city": "Seattle"}),
+        (
+            TargetKind.COUNTRY,
+            "US",
+            PresetFlags(p2p=True),
+            {"country": "US", "p2p": True},
+        ),
+        (
+            TargetKind.SERVER_ID,
+            "US-WA#187",
+            PresetFlags(),
+            {"server_id": "US-WA#187"},
+        ),
+        (
+            TargetKind.NONE,
+            "",
+            PresetFlags(secure_core=True),
+            {"secure_core": True},
+        ),
+        (
+            TargetKind.COUNTRY,
+            "US",
+            PresetFlags(tor=True, random=True),
+            {"country": "US", "tor": True, "random_server": True},
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_connect_preset_routes_to_cli(
+    qapp, tmp_path, target_kind, target_value, flags, expected_kwargs
+):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    store = PresetStore(path=tmp_path / "presets.json")
+    store.load()
+    p = store.add(
+        name="case",
+        target=PresetTarget(kind=target_kind, value=target_value),
+        flags=flags,
+    )
+    ctrl = Controller(cli, detector, preset_store=store)
+
+    ctrl.connect_preset(p.id)
+    for _ in range(20):
+        await asyncio.sleep(0.01)
+        if ctrl._in_flight and ctrl._in_flight.done():
+            break
+
+    assert cli.connect_calls == [expected_kwargs]
+
+
+@pytest.mark.asyncio
+async def test_connect_preset_blocked_when_signed_out(qapp, tmp_path):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(
+        answers=[ConnectionInfo(state=ConnState.DISCONNECTED, auth=AuthState.SIGNED_OUT)]
+    )
+    store = PresetStore(path=tmp_path / "presets.json")
+    presets = store.load()
+    ctrl = Controller(cli, detector, preset_store=store)
+    errors: list[str] = []
+    ctrl.error_occurred.connect(errors.append)
+
+    await ctrl._refresh_state()  # learn SIGNED_OUT
+
+    ctrl.connect_preset(presets[0].id)
+    await asyncio.sleep(0.02)
+    assert cli.connect_calls == []
+    assert errors and "sign in" in errors[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_connect_preset_missing_id_emits_error(qapp, tmp_path):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    store = PresetStore(path=tmp_path / "presets.json")
+    store.load()
+    ctrl = Controller(cli, detector, preset_store=store)
+    errors: list[str] = []
+    ctrl.error_occurred.connect(errors.append)
+
+    ctrl.connect_preset("does-not-exist")
+    await asyncio.sleep(0.02)
+    assert cli.connect_calls == []
+    assert errors and "not found" in errors[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_connect_preset_without_store_emits_error(qapp):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    ctrl = Controller(cli, detector)  # no preset_store
+    errors: list[str] = []
+    ctrl.error_occurred.connect(errors.append)
+
+    ctrl.connect_preset("any-id")
+    await asyncio.sleep(0.02)
+    assert cli.connect_calls == []
+    assert errors and "preset" in errors[0].lower()
 
 
 @pytest.mark.asyncio
