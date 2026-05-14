@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from vpnpilot.user_state import JsonStateStore, NullPersistence
 
 

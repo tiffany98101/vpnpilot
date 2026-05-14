@@ -8,6 +8,7 @@ handling is the CLI's job).
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 
 from PyQt6.QtCore import Qt, QTimer
@@ -123,11 +124,9 @@ class SignInPanel(QDialog):
             cb.setText(self.command_text())
 
     def _fire_recheck(self) -> None:
-        try:
+        # The callback owns its own error reporting; we just stay open.
+        with contextlib.suppress(Exception):
             self._on_recheck()
-        except Exception:  # noqa: BLE001
-            # The callback owns its own error reporting; we just stay open.
-            pass
 
     def _on_state_changed(self, info: ConnectionInfo) -> None:
         if info.auth is AuthState.SIGNED_IN:
@@ -138,8 +137,6 @@ class SignInPanel(QDialog):
         # Ensure the timer is stopped and the signal is disconnected so
         # the panel can be safely garbage-collected.
         self._timer.stop()
-        try:
+        with contextlib.suppress(TypeError, RuntimeError):
             self._state_signal.disconnect(self._on_state_changed)
-        except (TypeError, RuntimeError):
-            pass
         super().closeEvent(event)

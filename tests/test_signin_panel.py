@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal  # noqa: F401 (pyqtSignal used in class body)
 from PyQt6.QtWidgets import QApplication
 
 from vpnpilot.signin_panel import EMAIL_PLACEHOLDER, SignInPanel, build_signin_command

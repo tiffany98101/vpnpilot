@@ -11,10 +11,11 @@ AG. The Proton branding/logos are not used. The app never runs with
 elevated privileges; all privileged operations go through the CLI,
 which handles polkit itself.
 
-Current scope: **vertical slice** — tray icon (connected/disconnected/
-transitioning), state detection, and Connect-to-Seattle / Disconnect
-from the tray menu. No main window, settings UI, server browser, or
-event log yet.
+Current scope: tray icon with four UI states (connected, disconnected,
+transitioning, signed-out), state detection on two orthogonal axes
+(connection + auth), Connect-to-Seattle / Disconnect, and a modeless
+Sign-in panel. No main window, settings UI, server browser, or event
+log yet.
 
 ## Hard constraints
 
@@ -56,8 +57,9 @@ event log yet.
 
 Module roles:
 
-- `state.py` — `ConnState` enum and the `ConnectionInfo` dataclass that
-  flows through every layer.
+- `state.py` — `ConnState` enum, `AuthState` enum, and the
+  `ConnectionInfo` dataclass that flows through every layer. Connection
+  and auth are **orthogonal axes**: every snapshot carries both.
 - `cli.py` — async wrapper around the `protonvpn` binary, with timeouts
   and structured `CLIResult`. Parsers for `status` and `connect` output
   live next to the regex they target so a CLI upgrade only touches the
@@ -66,7 +68,15 @@ Module roles:
 - `controller.py` — single source of truth for app state. Runs the
   polling loop, owns the "in-flight command" guard, emits Qt signals.
 - `tray.py` — only file that knows about menus, icons, and KDE/GNOME
-  tray quirks. Reacts to controller signals.
+  tray quirks. Reacts to controller signals. Auth-state takes priority
+  over connection-state in the render switch — see "Auth axis" below.
+- `signin_panel.py` — modeless `SignInPanel(QDialog)` shown when the
+  user clicks the tray's "Sign in…" item. Knows nothing about the CLI
+  or asyncio — takes `on_recheck` callable and a `state_signal`,
+  closes itself when it observes `AuthState.SIGNED_IN`.
+- `user_state.py` — `JsonStateStore` persists *observed* state (last
+  signed-in email) to `~/.config/vpnpilot/state.json` (0600). This is
+  distinct from `settings.json` (user preferences, not yet implemented).
 - `app.py` — bootstrap: QApplication + qasync event loop + DI.
 - `_qasync_shim.py` — prefers system-installed `qasync`, falls back to
   the vendored copy under `_vendor/qasync`.
@@ -134,6 +144,43 @@ When a transition into CONNECTED happens, capture
 `stat -c %Y /sys/class/net/<iface>` once and cache. Compute uptime as
 `now - t0`. Do not stat per poll.
 
+### Auth axis
+
+Auth is detected via `protonvpn info`, which prints `Account: 'None'`
+(literal string) when signed out and `Account: '<email>'` when signed
+in — exit code is **0 in both cases** (see `docs/cli-reference.md`).
+`AuthDetector.probe()` returns `(AuthState, email | None)`. The
+`CompositeDetector` runs the auth probe concurrently with the
+interface check; both feed into a single `ConnectionInfo`.
+
+Controller gating:
+
+- `connect_preset_seattle` is a **no-op + error signal** when
+  `auth == SIGNED_OUT`. Saves the round-trip and surfaces a clean
+  message instead of relying on the CLI's "Authentication required."
+  stderr.
+- `disconnect` is intentionally **not** gated — it works at the CLI
+  even with no session and remains as a recovery path if detection
+  is wrong.
+
+Tray rendering: `auth == SIGNED_OUT` takes priority over the
+connection axis. The tray switches to the signed-out icon, replaces
+the disabled Connect/Disconnect items with a visible "Sign in…"
+item, and offers the panel as the only useful action.
+
+### Sign-in flow
+
+The CLI's `signin` is interactive (password, TOTP, captcha). We do
+not embed it. The panel:
+
+1. Pre-fills the suggested command using the last-known email from
+   `JsonStateStore` (`<email>` placeholder if first launch).
+2. Provides a Copy button that puts `protonvpn signin <email>` on
+   the clipboard.
+3. Auto-rechecks every 5 seconds via `Controller.force_refresh()`.
+4. Closes itself the moment a state-change with `AuthState.SIGNED_IN`
+   arrives.
+
 ### Public IP
 
 Three sources, in preference order:
@@ -156,15 +203,21 @@ Requires.
 If qasync ever lands in Fedora repos, add it to `Requires:` in the spec
 and the vendored copy can stay as fallback or be removed.
 
-## Settings & persistence (not yet implemented in slice)
+## Settings & persistence
 
-When added:
+Two files, separate by intent:
 
-- Schema: pydantic v2 model.
-- File: `~/.config/vpnpilot/settings.json` (XDG config).
-- Event log: `~/.local/state/vpnpilot/events.log` (XDG state), rolling
-  ~500 entries. Never logs CLI output verbatim — only events:
-  `2026-05-13T22:00:01Z user_action connect city=Seattle ok=true`.
+- **Observed state**: `~/.config/vpnpilot/state.json` (0600 mode).
+  What the app last saw the CLI report — currently just
+  `{"last_email": "..."}`. Managed by `JsonStateStore`. Atomic writes
+  via tmp+rename. Tolerant of missing / malformed files.
+- **User settings (not yet implemented)**:
+  `~/.config/vpnpilot/settings.json`. Will be a pydantic v2 model.
+
+Event log (not yet implemented): `~/.local/state/vpnpilot/events.log`
+(XDG state), rolling ~500 entries. Never logs CLI output verbatim —
+only events:
+`2026-05-13T22:00:01Z user_action connect city=Seattle ok=true`.
 
 ## Run / test / package
 
@@ -213,9 +266,6 @@ file is at `/usr/share/applications/vpnpilot.desktop`; icon at
   preferred preset, public-IP endpoint).
 - Auto-connect on login (XDG autostart with `--autoconnect`).
 - Connection event log with ~500-entry rolling persistence.
-- Sign-in detection panel (today the app assumes signed-in; CLI
-  errors are surfaced as toast notifications, which is enough for the
-  slice).
 
 These should be added one at a time, each a separate logical commit,
 each with tests. Keep `docs/cli-reference.md` updated whenever a new
