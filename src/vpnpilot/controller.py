@@ -72,6 +72,18 @@ class Controller(QObject):
     def disconnect(self) -> None:
         self._spawn(self._do_disconnect())
 
+    def force_refresh(self) -> None:
+        """Schedule an out-of-band detection pass.
+
+        Used by the sign-in panel's Recheck button and 5s auto-poll.
+        Schedules on the running asyncio loop; if there is none, no-ops
+        (which is what we want during shutdown).
+        """
+        try:
+            asyncio.get_running_loop().create_task(self._refresh_state())
+        except RuntimeError:
+            log.debug("force_refresh: no running loop, ignoring")
+
     # ----- internals -----
 
     def _spawn(self, coro) -> None:
