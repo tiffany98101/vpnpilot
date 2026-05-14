@@ -10,7 +10,9 @@ from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import APP_NAME, __version__
 from .controller import Controller
-from .state import ConnectionInfo, ConnState
+from .signin_panel import SignInPanel
+from .state import AuthState, ConnectionInfo, ConnState
+from .user_state import NullPersistence, Persistence
 
 log = logging.getLogger(__name__)
 
@@ -23,11 +25,19 @@ def _icon(name: str) -> QIcon:
 class TrayApp:
     """Owns the tray icon and routes menu actions to the controller."""
 
-    def __init__(self, app: QApplication, controller: Controller) -> None:
+    def __init__(
+        self,
+        app: QApplication,
+        controller: Controller,
+        *,
+        persistence: Persistence | None = None,
+    ) -> None:
         self._app = app
         self._controller = controller
+        self._persistence = persistence or NullPersistence()
         self._tray = QSystemTrayIcon()
         self._tray.setToolTip(f"{APP_NAME} {__version__}")
+        self._signin_panel: SignInPanel | None = None
         self._build_menu()
         self._connect_signals()
         self._render(controller.current)
@@ -39,6 +49,11 @@ class TrayApp:
 
     def _build_menu(self) -> None:
         self._menu = QMenu()
+
+        self._signin_action = QAction("Sign in…")
+        self._signin_action.triggered.connect(self._open_signin_panel)
+        self._signin_action.setVisible(False)
+        self._menu.addAction(self._signin_action)
 
         self._status_action = QAction("Status: unknown")
         self._status_action.setEnabled(False)
@@ -82,9 +97,41 @@ class TrayApp:
         log.warning("controller error: %s", msg)
         self._tray.showMessage(APP_NAME, msg, QSystemTrayIcon.MessageIcon.Warning, 5000)
 
+    # ----- signed-in panel -----
+
+    def _open_signin_panel(self) -> None:
+        # Singleton: don't stack multiple panels.
+        if self._signin_panel is not None and self._signin_panel.isVisible():
+            self._signin_panel.raise_()
+            self._signin_panel.activateWindow()
+            return
+        self._signin_panel = SignInPanel(
+            last_email=self._persistence.last_email(),
+            on_recheck=self._controller.force_refresh,
+            state_signal=self._controller.state_changed,
+        )
+        self._signin_panel.show()
+        self._signin_panel.raise_()
+        self._signin_panel.activateWindow()
+
     # ----- rendering -----
 
     def _render(self, info: ConnectionInfo) -> None:
+        # Auth state takes priority over connection state for the UI:
+        # if we're signed out, the whole "connect/disconnect" UX is
+        # unavailable and we surface the sign-in path instead.
+        if info.auth is AuthState.SIGNED_OUT:
+            self._tray.setIcon(_icon("icon-signed-out.svg"))
+            self._status_action.setText("Status: not signed in")
+            self._server_action.setVisible(False)
+            self._signin_action.setVisible(True)
+            self._connect_seattle_action.setEnabled(False)
+            self._disconnect_action.setEnabled(False)
+            self._tray.setToolTip("ProtonVPN: not signed in")
+            return
+
+        # auth is SIGNED_IN or UNKNOWN — render the connection axis as usual.
+        self._signin_action.setVisible(False)
         match info.state:
             case ConnState.CONNECTED:
                 self._tray.setIcon(_icon("icon-connected.svg"))

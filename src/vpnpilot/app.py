@@ -17,6 +17,7 @@ from .cli import ProtonCLI
 from .controller import Controller
 from .detect import default_detector
 from .tray import TrayApp, ensure_tray_available
+from .user_state import JsonStateStore
 
 log = logging.getLogger(__name__)
 
@@ -64,9 +65,10 @@ def main() -> int:
 
     cli = ProtonCLI()
     detector = default_detector(cli)
-    controller = Controller(cli, detector)
+    store = JsonStateStore()
+    controller = Controller(cli, detector, persistence=store)
 
-    tray = TrayApp(app, controller)
+    tray = TrayApp(app, controller, persistence=store)
     tray.show()
 
     # Ctrl-C in a terminal should exit cleanly.
