@@ -15,7 +15,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from .cli import ProtonCLI
 from .detect import Detector
-from .state import ConnectionInfo, ConnState
+from .state import AuthState, ConnectionInfo, ConnState
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +56,14 @@ class Controller(QObject):
     # ----- public actions -----
 
     def connect_preset_seattle(self) -> None:
+        # Gate on auth: connect fails noisily at the CLI when signed out,
+        # so prevent the round-trip and emit a clear in-app error instead.
+        # Disconnect is intentionally not gated — it works even with no
+        # session, and we want it available as a recovery path if our
+        # detection is somehow wrong.
+        if self._current.auth is AuthState.SIGNED_OUT:
+            self.error_occurred.emit("Sign in to ProtonVPN first.")
+            return
         self._spawn(self._do_connect(city="Seattle"))
 
     def disconnect(self) -> None:

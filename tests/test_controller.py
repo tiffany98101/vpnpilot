@@ -11,7 +11,7 @@ from PyQt6.QtCore import QCoreApplication
 from vpnpilot.cli import CLIResult, ProtonCLI
 from vpnpilot.controller import Controller
 from vpnpilot.detect import Detector
-from vpnpilot.state import ConnectionInfo, ConnState
+from vpnpilot.state import AuthState, ConnectionInfo, ConnState
 
 
 @dataclass
@@ -114,6 +114,50 @@ async def test_cli_failure_surfaces_via_error_signal(qapp):
         if ctrl._in_flight and ctrl._in_flight.done():
             break
     assert errors and "boom" in errors[0]
+
+
+@pytest.mark.asyncio
+async def test_connect_preset_blocked_when_signed_out(qapp):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[
+        ConnectionInfo(state=ConnState.DISCONNECTED, auth=AuthState.SIGNED_OUT),
+    ])
+    ctrl = Controller(cli, detector)
+    errors: list[str] = []
+    ctrl.error_occurred.connect(errors.append)
+
+    # Force one poll so the controller learns auth=SIGNED_OUT.
+    await ctrl._refresh_state()
+
+    ctrl.connect_preset_seattle()
+    await asyncio.sleep(0.02)
+    assert cli.connect_calls == []
+    assert errors and "sign in" in errors[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_not_gated_on_auth_state(qapp):
+    # disconnect should remain callable even when SIGNED_OUT — it works
+    # at the CLI level and is the recovery path if detection is wrong.
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[
+        ConnectionInfo(state=ConnState.DISCONNECTED, auth=AuthState.SIGNED_OUT),
+    ])
+    ctrl = Controller(cli, detector)
+    await ctrl._refresh_state()  # learn SIGNED_OUT
+
+    ctrl.disconnect()
+    for _ in range(20):
+        await asyncio.sleep(0.01)
+        if ctrl._in_flight and ctrl._in_flight.done():
+            break
+    assert cli.disconnect_calls == 1
 
 
 @pytest.mark.asyncio
