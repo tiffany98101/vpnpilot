@@ -1,5 +1,5 @@
 Name:           vpnpilot
-Version:        0.3.0
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Unofficial tray UI for the ProtonVPN CLI
 
@@ -66,6 +66,14 @@ install -Dm0644 src/vpnpilot/resources/icon-app.svg \
 %{_datadir}/icons/hicolor/scalable/apps/vpnpilot.svg
 
 %changelog
+* Thu May 14 2026 Tiffany von Arnim <tiffany.vonarnim@gmail.com> - 0.4.0-1
+- In-memory server catalog (vpnpilot.catalog): lazy country + city fetch
+  from the protonvpn CLI, background prewarm (sequential, one country at
+  a time), catalog_changed Qt signal for future browser UI.
+- vpnpilot catalog dump subcommand: JSON output for diagnostic use.
+- ProtonCLI.run_command() generic entry point; countries_list() and
+  cities_list() typed helpers.
+
 * Wed May 13 2026 Tiffany von Arnim <tiffany.vonarnim@gmail.com> - 0.2.1-1
 - Single-instance lock (fcntl.flock on $XDG_RUNTIME_DIR/vpnpilot.lock).
   Prevents duplicate tray icons when launched twice.
