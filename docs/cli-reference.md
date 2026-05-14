@@ -387,14 +387,128 @@ SIGNED_OUT + CONNECTED, since the kernel doesn't lie.)
 
 - `protonvpn servers`: prints a marketing URL only. **No useful output
   for the app.** Do not call.
-- `protonvpn countries list`: table of countries with codes and server
-  counts. Drive the country browser from this.
-- `protonvpn cities list <COUNTRY>`: cities. Drive the city browser
-  from this.
+- `protonvpn countries list`: table of countries with codes. Drive the
+  country browser from this.
+- `protonvpn cities list <COUNTRY>`: cities with features. Drive the
+  city browser from this.
 
 Both `countries list` and `cities list` are cheap and idempotent. The
 session-cached strategy (cache in memory for the lifetime of the
 process) is appropriate.
+
+## Catalog surface
+
+Captured on 2026-05-14 against `proton-vpn-cli 1.0.1` while signed in.
+
+### `protonvpn countries list`
+
+Exit 0. Stdout:
+
+```
+Country                           Code
+--------------------------------  ------
+Afghanistan                       AF
+Albania                           AL
+...
+United States                     US
+...
+```
+
+Format: two-column table. Line 1 is the header (`Country`, `Code`).
+Line 2 is a separator of dashes (`-`). Lines 3+ are data rows, each
+with the country name (may contain spaces) and the two-letter ISO code,
+separated by two or more spaces. No server count column (unlike what
+the top-level help implied). The name may contain multi-word names like
+"Bosnia and Herzegovina" and "Democratic Republic of the Congo" — single
+spaces within the name, always 2+ spaces before the code.
+
+Timing: ~1.4s (wall). This is the round-trip cost for one subprocess
+call. Countries list is fetched once and cached.
+
+### `protonvpn cities list <COUNTRY>`
+
+Exit 0 (for a valid, existing country code). Stdout:
+
+```
+Cities in United States:
+City            Features
+--------------  ----------
+Ashburn         P2P
+Atlanta         P2P, Tor
+Boston          P2P
+...
+Salt Lake City
+San Jose        P2P
+Seattle         P2P
+```
+
+Format: line 1 is `Cities in <Country Name>:` (human-readable header,
+not used for parsing). Line 2 is the column header (`City`, `Features`).
+Line 3 is the separator. Lines 4+ are data rows.
+
+The `Features` column is **optional** — some cities have no features
+(e.g., `Salt Lake City`) and the trailing column is simply absent.
+When present, features are comma-separated: `P2P`, `P2P, Tor`.
+
+Observed feature values:
+- `P2P` — P2P-optimised server
+- `Tor` — Tor-over-VPN server (note capitalisation: initial cap, not all-caps)
+
+City names may contain spaces (`New York`, `Los Angeles`, `Salt Lake City`).
+City names may contain diacritics (`São Paulo`). The parser must handle
+both. Country code normalised to uppercase by CLI (`us` → `US`).
+
+Timing: ~1.4–1.5s per call (wall). Same subprocess cost as countries.
+One call per country during prewarm; throttle to one at a time.
+
+#### One-city country (Iceland)
+
+```
+Cities in Iceland:
+City       Features
+---------  ----------
+Reykjavik  P2P
+```
+
+#### City with diacritics (Brazil)
+
+```
+Cities in Brazil:
+City       Features
+---------  ----------
+São Paulo  P2P
+```
+
+#### Invalid country code (`ZZ`)
+
+Exit 2. Stderr:
+
+```
+Error: Invalid country code 'ZZ'. Please use a valid country code.
+
+Try 'protonvpn cities list --help' for more information.
+```
+
+Stdout is empty. The catalog service marks the entry as `FAILED` with
+`last_error` set to this message.
+
+#### Lowercase normalisation (`us` → `US`)
+
+`protonvpn cities list us` succeeds identically to `cities list US`.
+The CLI normalises the code internally. vpnpilot always passes uppercase
+codes to avoid relying on this, but the normalisation is a safety net.
+
+### Catalog when signed out
+
+`countries list` exits 2 with the same "Authentication required" error
+seen on `connect` and `config list` (see "Unauthenticated state" above):
+
+```
+Error: Authentication required to view complete country list. Please sign in with 'protonvpn signin'
+```
+
+The catalog service detects this via `is_auth_error` and exposes
+`last_error`; the UI surfaces it rather than showing an empty list.
 
 ## Network interface behavior
 
