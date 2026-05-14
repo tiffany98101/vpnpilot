@@ -16,6 +16,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from .cli import ProtonCLI
 from .detect import Detector
 from .state import AuthState, ConnectionInfo, ConnState
+from .user_state import NullPersistence, Persistence
 
 log = logging.getLogger(__name__)
 
@@ -30,11 +31,13 @@ class Controller(QObject):
         detector: Detector,
         *,
         poll_interval: float = 3.0,
+        persistence: Persistence | None = None,
     ) -> None:
         super().__init__()
         self._cli = cli
         self._detector = detector
         self._poll_interval = poll_interval
+        self._persistence = persistence or NullPersistence()
         self._current = ConnectionInfo(state=ConnState.DISCONNECTED)
         self._in_flight: asyncio.Task | None = None
         self._poll_task: asyncio.Task | None = None
@@ -121,6 +124,9 @@ class Controller(QObject):
         if info == self._current:
             return
         self._current = info
+        # Cache the email whenever we observe a signed-in state. The
+        # persistence layer no-ops on None or unchanged values.
+        self._persistence.note_email(info.account_email)
         self.state_changed.emit(info)
 
 
