@@ -1,25 +1,26 @@
-"""Main window: status panel, preset list (placeholder), disconnect footer.
+"""Main window: status panel, preset list, disconnect footer.
 
 The main window is modeless. It reacts to controller.state_changed the
 same way the tray does, but renders more detail. The tray remains the
 sign-in path; this window only indicates auth status, it doesn't host
 the sign-in flow.
-
-Preset list area is a placeholder in this slice — the wiring lands in
-the next slice (see CLAUDE.md "Things not yet built").
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from importlib.resources import files
 
+from PyQt6.QtCore import QAbstractListModel, QModelIndex, Qt
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QListView,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -27,7 +28,7 @@ from PyQt6.QtWidgets import (
 
 from . import APP_NAME
 from .controller import Controller
-from .preset import PresetStore
+from .preset import Preset, PresetStore, PresetTarget, TargetKind
 from .state import AuthState, ConnectionInfo, ConnState
 
 log = logging.getLogger(__name__)
@@ -110,8 +111,267 @@ class StatusPanel(QFrame):
         self.auth_label.setVisible(info.auth is AuthState.SIGNED_OUT)
 
 
+def target_summary(target: PresetTarget) -> str:
+    """Human-readable one-line description of a preset target."""
+    if target.kind is TargetKind.NONE:
+        return "fastest available"
+    if target.kind is TargetKind.COUNTRY:
+        return f"country {target.value}"
+    if target.kind is TargetKind.CITY:
+        return f"city {target.value}"
+    if target.kind is TargetKind.SERVER_ID:
+        return f"server {target.value}"
+    return ""
+
+
+def _flag_summary(preset: Preset) -> str:
+    parts = []
+    if preset.flags.p2p:
+        parts.append("P2P")
+    if preset.flags.secure_core:
+        parts.append("Secure Core")
+    if preset.flags.tor:
+        parts.append("Tor")
+    if preset.flags.random:
+        parts.append("random")
+    return ", ".join(parts)
+
+
+def preset_display(preset: Preset) -> str:
+    """Single-line preset description for the list view."""
+    star = "★ " if preset.is_default else "   "
+    flags = _flag_summary(preset)
+    suffix = f" [{flags}]" if flags else ""
+    return f"{star}{preset.name} — {target_summary(preset.target)}{suffix}"
+
+
+def preset_matches_connection(preset: Preset, info: ConnectionInfo) -> bool:
+    """True iff the current connection looks like it was made *by* this preset.
+
+    Only the unambiguous match cases count: exact server-ID match, or
+    case-insensitive city match. Country and 'none' are intentionally
+    not matched here — the CLI accepts both country codes and names,
+    and 'none' is "fastest available" which could reasonably re-pick a
+    different server.
+    """
+    if info.state is not ConnState.CONNECTED:
+        return False
+    t = preset.target
+    if t.kind is TargetKind.SERVER_ID:
+        return (info.server or "") == t.value
+    if t.kind is TargetKind.CITY:
+        return (info.city or "").casefold() == t.value.casefold()
+    return False
+
+
+class PresetListModel(QAbstractListModel):
+    """Qt model backed by a PresetStore. Refresh after store mutations."""
+
+    PresetRole = Qt.ItemDataRole.UserRole + 1
+
+    def __init__(self, store: PresetStore, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._store = store
+        self._presets: list[Preset] = list(store.list_all())
+
+    def refresh(self) -> None:
+        self.beginResetModel()
+        self._presets = list(self._store.list_all())
+        self.endResetModel()
+
+    def rowCount(self, parent: QModelIndex | None = None) -> int:  # noqa: N802
+        if parent is not None and parent.isValid():
+            return 0
+        return len(self._presets)
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or index.row() >= len(self._presets):
+            return None
+        preset = self._presets[index.row()]
+        if role == Qt.ItemDataRole.DisplayRole:
+            return preset_display(preset)
+        if role == self.PresetRole:
+            return preset
+        return None
+
+    def preset_at(self, row: int) -> Preset | None:
+        if 0 <= row < len(self._presets):
+            return self._presets[row]
+        return None
+
+
+class PresetListPanel(QFrame):
+    """List of presets + Connect/Edit/Delete/New/Set-Default buttons.
+
+    Action callbacks are injected so the panel doesn't depend on the
+    Controller or any dialog. The parent (MainWindow) wires them up.
+    """
+
+    def __init__(
+        self,
+        store: PresetStore,
+        *,
+        on_connect: Callable[[Preset], None],
+        on_edit: Callable[[Preset], None],
+        on_new: Callable[[], None],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("presetArea")
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+
+        self._store = store
+        self._on_connect = on_connect
+        self._on_edit = on_edit
+        self._on_new = on_new
+        self._current_info = ConnectionInfo(state=ConnState.DISCONNECTED)
+
+        self._model = PresetListModel(store, self)
+        self.list_view = QListView()
+        self.list_view.setObjectName("presetList")
+        self.list_view.setModel(self._model)
+        self.list_view.setSelectionMode(QListView.SelectionMode.SingleSelection)
+        self.list_view.doubleClicked.connect(self._on_double_click)
+        sel = self.list_view.selectionModel()
+        sel.selectionChanged.connect(lambda *_: self._refresh_buttons())
+
+        self.connect_btn = QPushButton("Connect")
+        self.connect_btn.setObjectName("presetConnect")
+        self.edit_btn = QPushButton("Edit…")
+        self.edit_btn.setObjectName("presetEdit")
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setObjectName("presetDelete")
+        self.new_btn = QPushButton("New…")
+        self.new_btn.setObjectName("presetNew")
+        self.set_default_btn = QPushButton("Set Default")
+        self.set_default_btn.setObjectName("presetSetDefault")
+
+        self.connect_btn.clicked.connect(self._on_connect_clicked)
+        self.edit_btn.clicked.connect(self._on_edit_clicked)
+        self.delete_btn.clicked.connect(self._on_delete_clicked)
+        self.new_btn.clicked.connect(self._on_new_clicked)
+        self.set_default_btn.clicked.connect(self._on_set_default_clicked)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.addWidget(self.list_view, stretch=1)
+        btns = QHBoxLayout()
+        for b in (
+            self.connect_btn,
+            self.edit_btn,
+            self.delete_btn,
+            self.new_btn,
+            self.set_default_btn,
+        ):
+            btns.addWidget(b)
+        btns.addStretch(1)
+        layout.addLayout(btns)
+
+        # Select the first row by default if any presets exist.
+        if self._model.rowCount() > 0:
+            self.list_view.setCurrentIndex(self._model.index(0, 0))
+        self._refresh_buttons()
+
+    # ----- public -----
+
+    def refresh(self) -> None:
+        """Reload from the store. Preserves selection by preset id if possible."""
+        selected_id = None
+        p = self._selected_preset()
+        if p is not None:
+            selected_id = p.id
+        self._model.refresh()
+        # Restore selection.
+        if selected_id is not None:
+            for row in range(self._model.rowCount()):
+                if self._model.preset_at(row) and self._model.preset_at(row).id == selected_id:
+                    self.list_view.setCurrentIndex(self._model.index(row, 0))
+                    break
+        elif self._model.rowCount() > 0:
+            self.list_view.setCurrentIndex(self._model.index(0, 0))
+        self._refresh_buttons()
+
+    def update_for_connection(self, info: ConnectionInfo) -> None:
+        self._current_info = info
+        self._refresh_buttons()
+
+    # ----- internals -----
+
+    def _selected_preset(self) -> Preset | None:
+        rows = self.list_view.selectionModel().selectedRows()
+        if not rows:
+            current = self.list_view.currentIndex()
+            if current.isValid():
+                return self._model.preset_at(current.row())
+            return None
+        return self._model.preset_at(rows[0].row())
+
+    def _refresh_buttons(self) -> None:
+        preset = self._selected_preset()
+        has_selection = preset is not None
+        signed_out = self._current_info.auth is AuthState.SIGNED_OUT
+        already_at_target = bool(
+            preset and preset_matches_connection(preset, self._current_info)
+        )
+
+        self.connect_btn.setEnabled(
+            has_selection and not signed_out and not already_at_target
+        )
+        self.edit_btn.setEnabled(has_selection)
+        self.delete_btn.setEnabled(has_selection and not (preset and preset.is_default))
+        self.set_default_btn.setEnabled(
+            has_selection and not (preset and preset.is_default)
+        )
+        # new_btn always enabled.
+
+    def _on_double_click(self, index: QModelIndex) -> None:
+        preset = self._model.preset_at(index.row())
+        if preset and self.connect_btn.isEnabled():
+            self._on_connect(preset)
+
+    def _on_connect_clicked(self) -> None:
+        preset = self._selected_preset()
+        if preset:
+            self._on_connect(preset)
+
+    def _on_edit_clicked(self) -> None:
+        preset = self._selected_preset()
+        if preset:
+            self._on_edit(preset)
+
+    def _on_new_clicked(self) -> None:
+        self._on_new()
+
+    def _on_delete_clicked(self) -> None:
+        preset = self._selected_preset()
+        if preset is None or preset.is_default:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Delete preset",
+            f"Delete preset “{preset.name}”?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._store.delete(preset.id)
+        except ValueError as e:
+            QMessageBox.warning(self, "Could not delete", str(e))
+            return
+        self.refresh()
+
+    def _on_set_default_clicked(self) -> None:
+        preset = self._selected_preset()
+        if preset is None or preset.is_default:
+            return
+        self._store.set_default(preset.id)
+        self.refresh()
+
+
 class MainWindow(QMainWindow):
-    """Modeless main window. Status + preset placeholder + footer.
+    """Modeless main window. Status + preset list + disconnect footer.
 
     Hide-on-close keeps the window state across openings — the tray
     item just shows/raises this single instance instead of building a
@@ -146,19 +406,13 @@ class MainWindow(QMainWindow):
         self.status_panel = StatusPanel()
         outer.addWidget(self.status_panel)
 
-        # Preset list placeholder. Real list view lands in the next
-        # slice; the surrounding frame and footer wire-up are already
-        # in place so the swap is contained.
-        self._preset_area = QFrame()
-        self._preset_area.setObjectName("presetArea")
-        self._preset_area.setFrameShape(QFrame.Shape.StyledPanel)
-        preset_layout = QVBoxLayout(self._preset_area)
-        placeholder = QLabel("Presets — list view lands in the next slice.")
-        placeholder.setObjectName("presetPlaceholder")
-        placeholder.setStyleSheet("color: #888;")
-        preset_layout.addWidget(placeholder)
-        preset_layout.addStretch(1)
-        outer.addWidget(self._preset_area, stretch=1)
+        self.preset_panel = PresetListPanel(
+            preset_store,
+            on_connect=self._on_preset_connect,
+            on_edit=self._on_preset_edit,
+            on_new=self._on_preset_new,
+        )
+        outer.addWidget(self.preset_panel, stretch=1)
 
         footer = QHBoxLayout()
         footer.addStretch(1)
@@ -179,9 +433,29 @@ class MainWindow(QMainWindow):
 
     def _on_state_changed(self, info: ConnectionInfo) -> None:
         self.status_panel.render(info)
+        self.preset_panel.update_for_connection(info)
         # Disconnect stays enabled whenever we observe CONNECTED,
         # regardless of auth state — see CLAUDE.md "Auth axis".
         self.disconnect_btn.setEnabled(info.state is ConnState.CONNECTED)
 
     def _on_disconnect(self) -> None:
         self._controller.disconnect()
+
+    def _on_preset_connect(self, preset: Preset) -> None:
+        self._controller.connect_preset(preset.id)
+
+    def _on_preset_edit(self, preset: Preset) -> None:
+        # Real editor dialog lands in the next slice.
+        QMessageBox.information(
+            self,
+            "Edit preset",
+            f"Editing presets is coming in the next slice (would edit “{preset.name}”).",
+        )
+
+    def _on_preset_new(self) -> None:
+        # Real editor dialog lands in the next slice.
+        QMessageBox.information(
+            self,
+            "New preset",
+            "Creating presets is coming in the next slice.",
+        )
