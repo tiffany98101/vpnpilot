@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vpnpilot"
-version = "0.2.1"
+version = "0.3.0"
 description = "Unofficial tray UI for the ProtonVPN CLI on Linux"
 readme = "README.md"
 license = { file = "LICENSE" }
