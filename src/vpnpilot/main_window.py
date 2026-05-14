@@ -23,11 +23,14 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from . import APP_NAME
+from .browser import BrowseTab
+from .catalog import ServerCatalog
 from .controller import Controller
 from .preset import Preset, PresetStore, PresetTarget, TargetKind
 from .preset_editor import PresetEditorDialog
@@ -384,11 +387,12 @@ class MainWindow(QMainWindow):
         self,
         controller: Controller,
         preset_store: PresetStore,
+        catalog: ServerCatalog | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(APP_NAME)
-        self.resize(600, 450)
+        self.resize(700, 500)
         try:
             self.setWindowIcon(
                 QIcon(str(files("vpnpilot.resources").joinpath("icon-app.svg")))
@@ -398,6 +402,7 @@ class MainWindow(QMainWindow):
 
         self._controller = controller
         self._preset_store = preset_store
+        self._catalog = catalog
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -414,7 +419,19 @@ class MainWindow(QMainWindow):
             on_edit=self._on_preset_edit,
             on_new=self._on_preset_new,
         )
-        outer.addWidget(self.preset_panel, stretch=1)
+
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setObjectName("mainTabs")
+        self.tab_widget.addTab(self.preset_panel, "Presets")
+
+        if catalog is not None:
+            self.browse_tab = BrowseTab(catalog, controller, parent=self)
+            self.tab_widget.addTab(self.browse_tab, "Browse")
+            self.tab_widget.currentChanged.connect(self._on_tab_changed)
+        else:
+            self.browse_tab = None
+
+        outer.addWidget(self.tab_widget, stretch=1)
 
         footer = QHBoxLayout()
         footer.addStretch(1)
@@ -433,6 +450,10 @@ class MainWindow(QMainWindow):
         event.ignore()
         self.hide()
 
+    def _on_tab_changed(self, index: int) -> None:
+        if self.browse_tab is not None and self.tab_widget.widget(index) is self.browse_tab:
+            self.browse_tab.on_shown()
+
     def _on_state_changed(self, info: ConnectionInfo) -> None:
         self.status_panel.render(info)
         self.preset_panel.update_for_connection(info)
@@ -448,7 +469,9 @@ class MainWindow(QMainWindow):
 
     def _on_preset_edit(self, preset: Preset) -> None:
         taken = {p.name for p in self._preset_store.list_all() if p.id != preset.id}
-        dlg = PresetEditorDialog(preset=preset, taken_names=taken, parent=self)
+        dlg = PresetEditorDialog(
+            preset=preset, taken_names=taken, catalog=self._catalog, parent=self
+        )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         name, target, flags = dlg.values()
@@ -461,7 +484,9 @@ class MainWindow(QMainWindow):
 
     def _on_preset_new(self) -> None:
         taken = {p.name for p in self._preset_store.list_all()}
-        dlg = PresetEditorDialog(preset=None, taken_names=taken, parent=self)
+        dlg = PresetEditorDialog(
+            preset=None, taken_names=taken, catalog=self._catalog, parent=self
+        )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         name, target, flags = dlg.values()

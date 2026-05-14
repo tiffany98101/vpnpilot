@@ -9,6 +9,7 @@ from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import APP_NAME, __version__
+from .catalog import ServerCatalog
 from .controller import Controller
 from .main_window import MainWindow
 from .preset import PresetStore
@@ -34,11 +35,13 @@ class TrayApp:
         *,
         preset_store: PresetStore,
         persistence: Persistence | None = None,
+        catalog: ServerCatalog | None = None,
     ) -> None:
         self._app = app
         self._controller = controller
         self._preset_store = preset_store
         self._persistence = persistence or NullPersistence()
+        self._catalog = catalog
         self._tray = QSystemTrayIcon()
         self._tray.setToolTip(f"{APP_NAME} {__version__}")
         self._signin_panel: SignInPanel | None = None
@@ -174,7 +177,11 @@ class TrayApp:
         # Singleton: a single instance is created lazily and reused.
         # Hidden on close (see MainWindow.closeEvent), shown/raised here.
         if self._main_window is None:
-            self._main_window = MainWindow(self._controller, self._preset_store)
+            self._main_window = MainWindow(
+                self._controller,
+                self._preset_store,
+                catalog=self._catalog,
+            )
         self._main_window.show()
         self._main_window.raise_()
         self._main_window.activateWindow()

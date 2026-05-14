@@ -97,7 +97,7 @@ def main() -> int:
     )
     catalog = ServerCatalog(cli)
 
-    tray = TrayApp(app, controller, preset_store=preset_store, persistence=store)
+    tray = TrayApp(app, controller, preset_store=preset_store, persistence=store, catalog=catalog)
     tray.show()
 
     # Ctrl-C in a terminal should exit cleanly.
