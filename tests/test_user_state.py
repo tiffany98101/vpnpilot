@@ -8,7 +8,9 @@ from vpnpilot.user_state import JsonStateStore, NullPersistence
 def test_null_persistence_no_ops(tmp_path):
     p = NullPersistence()
     p.note_email("a@example.com")
+    p.set_poll_interval_key("5m")
     assert p.last_email() is None
+    assert p.poll_interval_key() is None
 
 
 def test_json_store_round_trip(tmp_path):
@@ -63,3 +65,12 @@ def test_json_store_file_permission_user_only(tmp_path):
     s.note_email("a@example.com")
     mode = path.stat().st_mode & 0o777
     assert mode == 0o600, f"expected 0o600, got {oct(mode)}"
+
+
+def test_json_store_poll_interval_round_trip(tmp_path):
+    path = tmp_path / "state.json"
+    s = JsonStateStore(path=path)
+    assert s.poll_interval_key() is None
+    s.set_poll_interval_key("5m")
+    assert s.poll_interval_key() == "5m"
+    assert JsonStateStore(path=path).poll_interval_key() == "5m"

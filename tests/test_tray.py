@@ -28,6 +28,10 @@ class FakeController(QObject):
         self.connect_preset = MagicMock()
         self.disconnect = MagicMock()
         self.force_refresh = MagicMock()
+        self.poll_interval_key = "10m"
+        self.set_poll_interval_key = MagicMock(
+            side_effect=lambda key: setattr(self, "poll_interval_key", key)
+        )
         self.stop = MagicMock()
 
 
@@ -167,9 +171,38 @@ def test_menu_structure_has_expected_top_level_items(qapp_instance, store):
     # Sign in… is hidden by default; status text varies; check the
     # named anchor items are present.
     assert any("Open VPNPilot" in t for t in texts)
+    assert "Refresh now" in texts
+    assert "Refresh interval" in texts
     assert "Connect to Seattle" in texts
     assert "Disconnect" in texts
     assert "Quit" in texts
+
+
+def test_refresh_now_routes_to_controller(qapp_instance, store):
+    ctrl = FakeController()
+    tray = TrayApp(qapp_instance, ctrl, preset_store=store)
+
+    tray._refresh_now_action.trigger()
+
+    ctrl.force_refresh.assert_called_once_with()
+
+
+def test_refresh_interval_menu_marks_current_selection(qapp_instance, store):
+    ctrl = FakeController()
+    ctrl.poll_interval_key = "5m"
+    tray = TrayApp(qapp_instance, ctrl, preset_store=store)
+
+    assert tray._refresh_interval_actions["5m"].isChecked() is True
+    assert tray._refresh_interval_actions["10m"].isChecked() is False
+
+
+def test_refresh_interval_menu_updates_controller(qapp_instance, store):
+    ctrl = FakeController()
+    tray = TrayApp(qapp_instance, ctrl, preset_store=store)
+
+    tray._refresh_interval_actions["manual"].trigger()
+
+    ctrl.set_poll_interval_key.assert_called_once_with("manual")
 
 
 def test_about_to_show_signal_triggers_rebuild(qapp_instance, store):

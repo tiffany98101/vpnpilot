@@ -7,12 +7,12 @@ from collections.abc import Callable
 from importlib.resources import files
 
 from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtGui import QAction, QActionGroup, QIcon
 from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import APP_NAME, __version__
 from .catalog import ServerCatalog
-from .controller import Controller
+from .controller import Controller, POLL_INTERVAL_CHOICES
 from .detect import detect_official_proton_gui_processes
 from .main_window import MainWindow
 from .preset import PresetStore
@@ -94,6 +94,37 @@ class TrayApp:
         self._open_window_action.triggered.connect(self._open_main_window)
         self._menu.addAction(self._open_window_action)
 
+        self._refresh_now_action = QAction("Refresh now")
+        self._refresh_now_action.triggered.connect(
+            lambda checked=False: self._controller.force_refresh()
+        )
+        self._menu.addAction(self._refresh_now_action)
+
+        self._refresh_interval_menu = QMenu("Refresh interval", self._menu)
+        self._refresh_interval_group = QActionGroup(self._menu)
+        self._refresh_interval_group.setExclusive(True)
+        self._refresh_interval_actions: dict[str, QAction] = {}
+        labels = {
+            "manual": "Manual only",
+            "2m": "Every 2 minutes",
+            "5m": "Every 5 minutes",
+            "10m": "Every 10 minutes",
+            "30m": "Every 30 minutes",
+        }
+        for key in POLL_INTERVAL_CHOICES:
+            action = QAction(labels[key], self._refresh_interval_menu)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda checked=False, selected=key: (
+                    self._controller.set_poll_interval_key(selected)
+                )
+            )
+            self._refresh_interval_menu.addAction(action)
+            self._refresh_interval_group.addAction(action)
+            self._refresh_interval_actions[key] = action
+        self._menu.addMenu(self._refresh_interval_menu)
+        self._sync_refresh_interval_menu()
+
         self._menu.addSeparator()
 
         # Dynamic connect section. The actions for "Connect to <default>"
@@ -118,9 +149,16 @@ class TrayApp:
         # Rebuild dynamic section right before the user sees the menu.
         # Also rebuild now so the initial state is correct.
         self._menu.aboutToShow.connect(self._rebuild_connect_section)
+        self._menu.aboutToShow.connect(self._sync_refresh_interval_menu)
         self._rebuild_connect_section()
 
         self._tray.setContextMenu(self._menu)
+
+    def _sync_refresh_interval_menu(self) -> None:
+        key = getattr(self._controller, "poll_interval_key", "10m")
+        if key not in self._refresh_interval_actions:
+            key = "10m"
+        self._refresh_interval_actions[key].setChecked(True)
 
     def _rebuild_connect_section(self) -> None:
         """Rebuild the (Connect to default + submenu) section in place."""

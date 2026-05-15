@@ -35,6 +35,8 @@ class Persistence(Protocol):
 
     def note_email(self, email: str | None) -> None: ...
     def last_email(self) -> str | None: ...
+    def poll_interval_key(self) -> str | None: ...
+    def set_poll_interval_key(self, key: str) -> None: ...
 
 
 class NullPersistence:
@@ -45,6 +47,12 @@ class NullPersistence:
 
     def last_email(self) -> str | None:
         return None
+
+    def poll_interval_key(self) -> str | None:
+        return None
+
+    def set_poll_interval_key(self, key: str) -> None:
+        return
 
 
 class JsonStateStore:
@@ -102,5 +110,17 @@ class JsonStateStore:
         if data.get("last_email") == email:
             return
         data = dict(data, last_email=email)
+        self._cache = data
+        self._write(data)
+
+    def poll_interval_key(self) -> str | None:
+        value = self._load().get("poll_interval")
+        return value if isinstance(value, str) else None
+
+    def set_poll_interval_key(self, key: str) -> None:
+        data = self._load()
+        if data.get("poll_interval") == key:
+            return
+        data = dict(data, poll_interval=key)
         self._cache = data
         self._write(data)

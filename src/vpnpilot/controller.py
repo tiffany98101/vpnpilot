@@ -21,8 +21,18 @@ from .state import AuthState, ConnectionInfo, ConnState
 from .user_state import NullPersistence, Persistence
 
 _SERVER_ID_RE = re.compile(r"^[A-Z]{2}(-[A-Z]{2,3})?#\d+(-TOR)?$")
-POLL_INTERVAL_SECONDS = 120.0
+DEFAULT_POLL_INTERVAL_KEY = "10m"
+DEFAULT_POLL_INTERVAL_SECONDS = 600.0
+POLL_INTERVAL_CHOICES: dict[str, float | None] = {
+    "manual": None,
+    "2m": 120.0,
+    "5m": 300.0,
+    "10m": DEFAULT_POLL_INTERVAL_SECONDS,
+    "30m": 1800.0,
+}
+POLL_INTERVAL_SECONDS = DEFAULT_POLL_INTERVAL_SECONDS
 MIN_REFRESH_INTERVAL_SECONDS = 30.0
+_PERSISTED_POLL_INTERVAL = object()
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +46,7 @@ class Controller(QObject):
         cli: ProtonCLI,
         detector: Detector,
         *,
-        poll_interval: float = POLL_INTERVAL_SECONDS,
+        poll_interval: float | None | object = _PERSISTED_POLL_INTERVAL,
         min_refresh_interval: float = MIN_REFRESH_INTERVAL_SECONDS,
         persistence: Persistence | None = None,
         preset_store: PresetStore | None = None,
@@ -44,9 +54,14 @@ class Controller(QObject):
         super().__init__()
         self._cli = cli
         self._detector = detector
-        self._poll_interval = poll_interval
         self._min_refresh_interval = min_refresh_interval
         self._persistence = persistence or NullPersistence()
+        self._poll_interval_key = DEFAULT_POLL_INTERVAL_KEY
+        if poll_interval is _PERSISTED_POLL_INTERVAL:
+            self._poll_interval_key = self._load_poll_interval_key()
+            self._poll_interval = POLL_INTERVAL_CHOICES[self._poll_interval_key]
+        else:
+            self._poll_interval = poll_interval
         self._preset_store = preset_store
         self._current = ConnectionInfo(state=ConnState.DISCONNECTED)
         self._in_flight: asyncio.Task | None = None
@@ -59,9 +74,15 @@ class Controller(QObject):
     def current(self) -> ConnectionInfo:
         return self._current
 
+    @property
+    def poll_interval_key(self) -> str:
+        return self._poll_interval_key
+
     def start(self) -> None:
         if self._poll_task is None:
-            self._poll_task = asyncio.create_task(self._poll_loop(), name="vpnpilot-poll")
+            self._poll_task = asyncio.create_task(
+                self._poll_loop(initial_poll=True), name="vpnpilot-poll"
+            )
 
     def stop(self) -> None:
         self._stopping.set()
@@ -131,11 +152,38 @@ class Controller(QObject):
         (which is what we want during shutdown).
         """
         try:
-            asyncio.get_running_loop().create_task(self._refresh_state())
+            asyncio.get_running_loop().create_task(self._refresh_state(force=True))
         except RuntimeError:
             log.debug("force_refresh: no running loop, ignoring")
 
+    def set_poll_interval_key(self, key: str) -> None:
+        if key not in POLL_INTERVAL_CHOICES:
+            key = DEFAULT_POLL_INTERVAL_KEY
+        if key == self._poll_interval_key:
+            return
+        self._poll_interval_key = key
+        self._poll_interval = POLL_INTERVAL_CHOICES[key]
+        self._persistence.set_poll_interval_key(key)
+        self._reschedule_poll_loop()
+
     # ----- internals -----
+
+    def _load_poll_interval_key(self) -> str:
+        key = self._persistence.poll_interval_key()
+        if key in POLL_INTERVAL_CHOICES:
+            return key
+        return DEFAULT_POLL_INTERVAL_KEY
+
+    def _reschedule_poll_loop(self) -> None:
+        if self._poll_task is None:
+            return
+        self._poll_task.cancel()
+        if self._poll_interval is None:
+            self._poll_task = None
+            return
+        self._poll_task = asyncio.create_task(
+            self._poll_loop(initial_poll=False), name="vpnpilot-poll"
+        )
 
     def _spawn(self, coro) -> None:
         if self._in_flight and not self._in_flight.done():
@@ -159,12 +207,15 @@ class Controller(QObject):
             self.error_occurred.emit(_short_err(result))
         await self._refresh_state(force=True)
 
-    async def _poll_loop(self) -> None:
+    async def _poll_loop(self, *, initial_poll: bool) -> None:
         try:
-            while not self._stopping.is_set():
+            if initial_poll and not self._stopping.is_set():
                 await self._poll_once()
+            while self._poll_interval is not None and not self._stopping.is_set():
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._stopping.wait(), timeout=self._poll_interval)
+                if not self._stopping.is_set():
+                    await self._poll_once()
         except asyncio.CancelledError:
             pass
 

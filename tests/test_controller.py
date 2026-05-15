@@ -10,6 +10,7 @@ from PyQt6.QtCore import QCoreApplication
 
 from vpnpilot.cli import CLIResult, ProtonCLI
 from vpnpilot.controller import (
+    DEFAULT_POLL_INTERVAL_SECONDS,
     MIN_REFRESH_INTERVAL_SECONDS,
     POLL_INTERVAL_SECONDS,
     Controller,
@@ -62,6 +63,27 @@ class ScriptedCLI(ProtonCLI):
 
     async def status(self):  # type: ignore[override]
         return CLIResult(0, "", "")
+
+
+class MemoryPersistence:
+    def __init__(self, poll_interval: str | None = None) -> None:
+        self._poll_interval = poll_interval
+        self.saved_poll_intervals: list[str] = []
+        self.emails: list[str] = []
+
+    def note_email(self, email: str | None) -> None:
+        if email:
+            self.emails.append(email)
+
+    def last_email(self) -> str | None:
+        return self.emails[-1] if self.emails else None
+
+    def poll_interval_key(self) -> str | None:
+        return self._poll_interval
+
+    def set_poll_interval_key(self, key: str) -> None:
+        self._poll_interval = key
+        self.saved_poll_intervals.append(key)
 
 
 @pytest.fixture
@@ -146,7 +168,35 @@ def test_default_polling_is_conservative(qapp):
     ctrl = Controller(cli, detector)
 
     assert ctrl._poll_interval == POLL_INTERVAL_SECONDS
+    assert ctrl._poll_interval == DEFAULT_POLL_INTERVAL_SECONDS
+    assert ctrl.poll_interval_key == "10m"
     assert ctrl._min_refresh_interval == MIN_REFRESH_INTERVAL_SECONDS
+
+
+def test_persisted_poll_interval_is_loaded(qapp):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    persistence = MemoryPersistence("5m")
+    ctrl = Controller(cli, detector, persistence=persistence)
+
+    assert ctrl.poll_interval_key == "5m"
+    assert ctrl._poll_interval == 300.0
+
+
+def test_invalid_persisted_poll_interval_falls_back_to_default(qapp):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    persistence = MemoryPersistence("bogus")
+    ctrl = Controller(cli, detector, persistence=persistence)
+
+    assert ctrl.poll_interval_key == "10m"
+    assert ctrl._poll_interval == DEFAULT_POLL_INTERVAL_SECONDS
 
 
 @pytest.mark.asyncio
@@ -181,6 +231,63 @@ async def test_forced_refresh_bypasses_rate_limit(qapp):
 
 
 @pytest.mark.asyncio
+async def test_manual_only_disables_periodic_polling_after_startup_poll(qapp):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    persistence = MemoryPersistence("manual")
+    ctrl = Controller(cli, detector, persistence=persistence)
+
+    ctrl.start()
+    await asyncio.sleep(0.02)
+
+    assert detector.calls == 1
+    assert ctrl._poll_task is not None
+    assert ctrl._poll_task.done()
+
+
+@pytest.mark.asyncio
+async def test_changing_poll_interval_reschedules_without_immediate_refresh(qapp):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    persistence = MemoryPersistence("30m")
+    ctrl = Controller(cli, detector, persistence=persistence)
+
+    ctrl.start()
+    await asyncio.sleep(0.02)
+    assert detector.calls == 1
+
+    ctrl.set_poll_interval_key("5m")
+    await asyncio.sleep(0.02)
+
+    assert ctrl.poll_interval_key == "5m"
+    assert ctrl._poll_interval == 300.0
+    assert persistence.saved_poll_intervals == ["5m"]
+    assert detector.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_refresh_forces_refresh(qapp):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    ctrl = Controller(cli, detector, min_refresh_interval=30.0)
+
+    await ctrl._refresh_state()
+    ctrl.force_refresh()
+    await asyncio.sleep(0.02)
+
+    assert detector.calls == 2
+
+
+@pytest.mark.asyncio
 async def test_cli_failure_surfaces_via_error_signal(qapp, tmp_path):
     cli = ScriptedCLI(
         connect_result=CLIResult(1, "", "boom: server unreachable"),
@@ -198,6 +305,38 @@ async def test_cli_failure_surfaces_via_error_signal(qapp, tmp_path):
         if ctrl._in_flight and ctrl._in_flight.done():
             break
     assert errors and "boom" in errors[0]
+
+
+@pytest.mark.asyncio
+async def test_connect_disconnect_refreshes_bypass_cooldown(qapp, tmp_path):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(
+        answers=[
+            ConnectionInfo(state=ConnState.DISCONNECTED),
+            ConnectionInfo(state=ConnState.CONNECTED),
+            ConnectionInfo(state=ConnState.DISCONNECTED),
+        ]
+    )
+    store = PresetStore(path=tmp_path / "presets.json")
+    seattle = store.load()[0]
+    ctrl = Controller(cli, detector, min_refresh_interval=30.0, preset_store=store)
+
+    await ctrl._refresh_state()
+    ctrl.connect_preset(seattle.id)
+    for _ in range(20):
+        await asyncio.sleep(0.01)
+        if ctrl._in_flight and ctrl._in_flight.done():
+            break
+    ctrl.disconnect()
+    for _ in range(20):
+        await asyncio.sleep(0.01)
+        if ctrl._in_flight and ctrl._in_flight.done():
+            break
+
+    assert detector.calls == 3
 
 
 @pytest.mark.asyncio
