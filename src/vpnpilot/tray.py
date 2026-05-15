@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from importlib.resources import files
 
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import APP_NAME, __version__
 from .catalog import ServerCatalog
 from .controller import Controller
+from .detect import detect_official_proton_gui_processes
 from .main_window import MainWindow
 from .preset import PresetStore
 from .signin_panel import SignInPanel
@@ -18,6 +21,7 @@ from .state import AuthState, ConnectionInfo, ConnState
 from .user_state import NullPersistence, Persistence
 
 log = logging.getLogger(__name__)
+_GUI_CONFLICT_POLL_MS = 15000
 
 
 def _icon(name: str) -> QIcon:
@@ -36,22 +40,32 @@ class TrayApp:
         preset_store: PresetStore,
         persistence: Persistence | None = None,
         catalog: ServerCatalog | None = None,
+        official_gui_detector: Callable[[], list[int]] | None = None,
     ) -> None:
         self._app = app
         self._controller = controller
         self._preset_store = preset_store
         self._persistence = persistence or NullPersistence()
         self._catalog = catalog
+        self._official_gui_detector = (
+            official_gui_detector or detect_official_proton_gui_processes
+        )
+        self._last_gui_conflict_pids: set[int] = set()
         self._tray = QSystemTrayIcon()
         self._tray.setToolTip(f"{APP_NAME} {__version__}")
         self._signin_panel: SignInPanel | None = None
         self._main_window: MainWindow | None = None
+        self._gui_conflict_timer = QTimer(self._tray)
+        self._gui_conflict_timer.setInterval(_GUI_CONFLICT_POLL_MS)
+        self._gui_conflict_timer.timeout.connect(self._check_official_gui_conflict)
         self._build_menu()
         self._connect_signals()
         self._render(controller.current)
+        self._gui_conflict_timer.start()
 
     def show(self) -> None:
         self._tray.show()
+        self._check_official_gui_conflict()
 
     # ----- menu -----
 
@@ -193,7 +207,38 @@ class TrayApp:
 
     def _on_error(self, msg: str) -> None:
         log.warning("controller error: %s", msg)
-        self._tray.showMessage(APP_NAME, msg, QSystemTrayIcon.MessageIcon.Warning, 5000)
+        self._show_warning(msg, duration_ms=5000)
+
+    def _check_official_gui_conflict(self) -> None:
+        """Show a warning when the official Proton GUI is likely running."""
+        try:
+            pids = sorted(set(self._official_gui_detector()))
+        except Exception:  # noqa: BLE001
+            log.exception("official GUI conflict probe failed")
+            return
+
+        if not pids:
+            self._last_gui_conflict_pids.clear()
+            return
+        pid_set = set(pids)
+        if pid_set == self._last_gui_conflict_pids:
+            return
+        self._last_gui_conflict_pids = pid_set
+
+        if len(pids) == 1:
+            pid_blob = f"pid {pids[0]}"
+        else:
+            pid_blob = "pids " + ", ".join(str(pid) for pid in pids)
+        msg = (
+            f"Official Proton VPN GUI appears to be running ({pid_blob}). "
+            "Proton docs warn that the GUI and CLI should not run at the same time."
+        )
+        self._show_warning(msg, duration_ms=9000)
+
+    def _show_warning(self, message: str, *, duration_ms: int) -> None:
+        self._tray.showMessage(
+            APP_NAME, message, QSystemTrayIcon.MessageIcon.Warning, duration_ms
+        )
 
     # ----- signed-in panel -----
 

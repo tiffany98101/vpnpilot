@@ -14,6 +14,8 @@ from vpnpilot.preset import (
     PresetStore,
     PresetTarget,
     TargetKind,
+    decode_city_target,
+    encode_city_target,
     preset_from_dict,
     preset_to_connect_kwargs,
     preset_to_dict,
@@ -70,10 +72,43 @@ def test_preset_dict_round_trip():
     assert p == p2
 
 
+def test_preset_dict_round_trip_scoped_city_value():
+    p = Preset.new(
+        name="Seattle (US)",
+        target=PresetTarget(kind=TargetKind.CITY, value="US::Seattle"),
+    )
+    d = preset_to_dict(p)
+    assert d["target"]["value"] == "US::Seattle"
+    p2 = preset_from_dict(d)
+    assert p2.target.value == "US::Seattle"
+
+
+def test_city_target_encode_decode_round_trip():
+    value = encode_city_target("Seattle", "US")
+    assert value == "US::Seattle"
+    code, city = decode_city_target(value)
+    assert code == "US"
+    assert city == "Seattle"
+
+
+def test_city_target_decode_legacy_unscoped_value():
+    code, city = decode_city_target("Seattle")
+    assert code is None
+    assert city == "Seattle"
+
+
 def test_preset_to_connect_kwargs_city():
     p = Preset.new(
         name="Seattle",
         target=PresetTarget(kind=TargetKind.CITY, value="Seattle"),
+    )
+    assert preset_to_connect_kwargs(p) == {"city": "Seattle"}
+
+
+def test_preset_to_connect_kwargs_city_scoped():
+    p = Preset.new(
+        name="Seattle US",
+        target=PresetTarget(kind=TargetKind.CITY, value="US::Seattle"),
     )
     assert preset_to_connect_kwargs(p) == {"city": "Seattle"}
 

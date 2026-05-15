@@ -174,11 +174,18 @@ def test_target_summary_kinds():
     )
     assert (
         target_summary(PresetTarget(kind=TargetKind.CITY, value="Seattle"))
-        == "city Seattle"
+        == "city Seattle (best effort)"
     )
     assert (
         target_summary(PresetTarget(kind=TargetKind.SERVER_ID, value="US-WA#1"))
         == "server US-WA#1"
+    )
+
+
+def test_target_summary_city_with_country_scope():
+    assert (
+        target_summary(PresetTarget(kind=TargetKind.CITY, value="US::Seattle"))
+        == "city Seattle (US, best effort)"
     )
 
 
@@ -218,6 +225,17 @@ def test_preset_matches_connection_city_case_insensitive():
         target=PresetTarget(kind=TargetKind.CITY, value="Seattle"),
     )
     info = ConnectionInfo(state=ConnState.CONNECTED, server="X#1", city="seattle")
+    assert preset_matches_connection(p, info) is True
+
+
+def test_preset_matches_connection_city_with_scoped_value():
+    from vpnpilot.preset import Preset
+
+    p = Preset.new(
+        name="ct",
+        target=PresetTarget(kind=TargetKind.CITY, value="US::Seattle"),
+    )
+    info = ConnectionInfo(state=ConnState.CONNECTED, server="X#1", city="Seattle")
     assert preset_matches_connection(p, info) is True
 
 

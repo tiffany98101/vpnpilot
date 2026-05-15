@@ -40,6 +40,7 @@ log = logging.getLogger(__name__)
 # Minimum column widths so the splitter doesn't collapse panes.
 _MIN_COUNTRY_WIDTH = 140
 _MIN_CITY_WIDTH = 200
+_CITY_BEST_EFFORT_NOTE = "city match is best-effort via Proton CLI"
 
 
 # --------------------------------------------------------------------------
@@ -513,7 +514,9 @@ class BrowseTab(QWidget):
         if country is None:
             self.hint_label.setText("Select a country or city to connect.")
         elif city is not None:
-            self.hint_label.setText(f"Selected: {country.name} / {city.name}")
+            self.hint_label.setText(
+                f"Selected: {country.name} / {city.name} ({_CITY_BEST_EFFORT_NOTE})"
+            )
         else:
             self.hint_label.setText(f"Selected: {country.name}")
 

@@ -133,6 +133,7 @@ _US_CITIES = [
     City(name="Atlanta", country_code="US", features=frozenset({CityFeature.P2P, CityFeature.TOR})),
     City(name="Seattle", country_code="US", features=frozenset({CityFeature.P2P})),
 ]
+_DUPLICATE_CITY = "Springfield"
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +315,49 @@ def test_browse_tab_connect_btn_country_only(qapp, qtbot):
     country_code, city = ctrl.connect_location_calls[0]
     assert country_code == "DE"
     assert city is None
+
+
+def test_browse_tab_city_hint_marks_best_effort(qapp, qtbot):
+    cat = FakeCatalog(countries=_COUNTRIES)
+    cat.set_entry_loaded(
+        "DE",
+        [City(name=_DUPLICATE_CITY, country_code="DE")],
+    )
+    ctrl = _make_controller()
+    tab = BrowseTab(catalog=cat, controller=ctrl)
+    qtbot.addWidget(tab)
+
+    tab.country_list.setCurrentIndex(tab._country_proxy.index(0, 0))
+    tab.city_list.setCurrentIndex(tab._city_proxy.index(0, 0))
+    tab._on_city_selection_changed()
+
+    hint = tab.hint_label.text().lower()
+    assert "best-effort" in hint
+    assert _DUPLICATE_CITY.lower() in hint
+
+
+def test_browse_tab_duplicate_city_names_still_pass_selected_country(qapp, qtbot):
+    cat = FakeCatalog(countries=_COUNTRIES)
+    cat.set_entry_loaded("DE", [City(name=_DUPLICATE_CITY, country_code="DE")])
+    cat.set_entry_loaded("US", [City(name=_DUPLICATE_CITY, country_code="US")])
+    ctrl = _make_controller()
+    tab = BrowseTab(catalog=cat, controller=ctrl)
+    qtbot.addWidget(tab)
+
+    # Germany row is index 0 after sort.
+    tab.country_list.setCurrentIndex(tab._country_proxy.index(0, 0))
+    tab.city_list.setCurrentIndex(tab._city_proxy.index(0, 0))
+    tab._on_connect_clicked()
+
+    # United States row is index 2 after sort.
+    tab.country_list.setCurrentIndex(tab._country_proxy.index(2, 0))
+    tab.city_list.setCurrentIndex(tab._city_proxy.index(0, 0))
+    tab._on_connect_clicked()
+
+    assert ctrl.connect_location_calls == [
+        ("DE", _DUPLICATE_CITY),
+        ("US", _DUPLICATE_CITY),
+    ]
 
 
 def test_browse_tab_server_id_valid_calls_connect(qapp, qtbot):

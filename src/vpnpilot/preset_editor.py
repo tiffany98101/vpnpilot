@@ -29,7 +29,14 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .preset import Preset, PresetFlags, PresetTarget, TargetKind
+from .preset import (
+    Preset,
+    PresetFlags,
+    PresetTarget,
+    TargetKind,
+    decode_city_target,
+    encode_city_target,
+)
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +52,10 @@ _KIND_ORDER = [
 _KIND_HINT = {
     TargetKind.NONE: "",
     TargetKind.COUNTRY: "Country code (US, GB, DE) or full name (\"United States\").",
-    TargetKind.CITY: "City name. Multi-word names should be entered as written.",
+    TargetKind.CITY: (
+        "City name. Proton CLI city matching is best-effort and not strictly "
+        "country-scoped; use a server ID for exact targeting."
+    ),
     TargetKind.SERVER_ID: "Server ID like \"US-WA#187\" or \"US-GA#29-TOR\".",
 }
 
@@ -77,6 +87,7 @@ class PresetEditorDialog(QDialog):
         self._taken_names = set(taken_names)
         self._editing_preset = preset
         self._catalog = catalog
+        self._city_country_scoped = False
 
         outer = QVBoxLayout(self)
 
@@ -255,6 +266,7 @@ class PresetEditorDialog(QDialog):
     def _on_country_selection_changed(self, index: int) -> None:
         if self._current_kind() is not TargetKind.CITY:
             return
+        self._city_country_scoped = index >= 0
         code = self._resolved_country_code()
         if code:
             self._populate_catalog_cities(code)
@@ -315,9 +327,17 @@ class PresetEditorDialog(QDialog):
                 if self.country_combo.currentText() != value:
                     self.country_combo.setEditText(value)
         elif preset.target.kind is TargetKind.CITY and self._catalog is not None:
-            # City presets store only the city name; put it in the city combo.
-            # Country combo stays unset — user can select for discovery.
-            self.city_combo.setEditText(value)
+            # Scoped values may include an encoded country code (CC::City).
+            country_code, city = decode_city_target(value)
+            if country_code:
+                if not self._select_country_by_code(country_code):
+                    self.country_combo.setEditText(country_code)
+                self._populate_catalog_cities(country_code)
+                self._city_country_scoped = True
+            else:
+                self.country_combo.setCurrentIndex(-1)
+                self._city_country_scoped = False
+            self.city_combo.setEditText(city)
         else:
             self.value_edit.setText(value)
 
@@ -362,7 +382,13 @@ class PresetEditorDialog(QDialog):
                     return text[start + 1:end].strip()
             return text
         if kind is TargetKind.CITY and self._catalog is not None:
-            return self.city_combo.currentText().strip()
+            city = self.city_combo.currentText().strip()
+            if not city:
+                return ""
+            if not self._city_country_scoped:
+                return city
+            country_code = self._resolved_country_code()
+            return encode_city_target(city, country_code or None)
         return self.value_edit.text().strip()
 
     def _on_kind_changed(self) -> None:
@@ -387,6 +413,8 @@ class PresetEditorDialog(QDialog):
                 self.value_edit.setVisible(True)
                 self.value_label.setVisible(True)
         elif kind is TargetKind.CITY:
+            if use_catalog and not self._city_country_scoped:
+                self.country_combo.setCurrentIndex(-1)
             if use_catalog:
                 self.country_combo.setVisible(True)
                 self.country_label.setVisible(True)

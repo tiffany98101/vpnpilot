@@ -145,6 +145,7 @@ async def test_disconnect_not_gated_on_auth_state(qapp):
     "target_kind, target_value, flags, expected_kwargs",
     [
         (TargetKind.CITY, "Seattle", PresetFlags(), {"city": "Seattle"}),
+        (TargetKind.CITY, "US::Seattle", PresetFlags(), {"city": "Seattle"}),
         (
             TargetKind.COUNTRY,
             "US",

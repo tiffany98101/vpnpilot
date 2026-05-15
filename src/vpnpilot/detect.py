@@ -16,11 +16,17 @@ import re
 import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 
 from .cli import ProtonCLI, parse_info, parse_status
 from .state import AuthState, ConnectionInfo, ConnState
 
 PROTON_IFACE_RE = re.compile(r"^proton\d+$")
+_OFFICIAL_GUI_EXECUTABLES = frozenset({
+    "protonvpn-app",
+    "proton-vpn-gtk-app",
+})
+_OFFICIAL_GUI_MODULE_PREFIX = "proton.vpn.app.gtk"
 
 
 @dataclass(frozen=True)
@@ -34,6 +40,71 @@ class Detector(ABC):
 
     @abstractmethod
     async def detect(self) -> ConnectionInfo: ...
+
+
+def detect_official_proton_gui_processes(
+    *, proc_root: str = "/proc", exclude_pid: int | None = None
+) -> list[int]:
+    """Return PIDs that look like the official Proton VPN Linux GUI app.
+
+    Conservative heuristics:
+      - executable/comm is exactly `protonvpn-app` (official entry point),
+        or
+      - Python `-m proton.vpn.app.gtk...` module execution.
+    """
+    excluded = os.getpid() if exclude_pid is None else exclude_pid
+    matches: list[int] = []
+    try:
+        entries = os.listdir(proc_root)
+    except OSError:
+        return matches
+
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        if pid == excluded:
+            continue
+        cmdline = _read_proc_cmdline(Path(proc_root), pid)
+        comm = _read_proc_comm(Path(proc_root), pid)
+        if _looks_like_official_proton_gui(cmdline=cmdline, comm=comm):
+            matches.append(pid)
+    return sorted(matches)
+
+
+def _read_proc_cmdline(proc_root: Path, pid: int) -> list[str]:
+    path = proc_root / str(pid) / "cmdline"
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return []
+    if not raw:
+        return []
+    return [chunk for chunk in raw.decode("utf-8", errors="replace").split("\x00") if chunk]
+
+
+def _read_proc_comm(proc_root: Path, pid: int) -> str:
+    path = proc_root / str(pid) / "comm"
+    try:
+        return path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+
+
+def _looks_like_official_proton_gui(*, cmdline: list[str], comm: str) -> bool:
+    if comm in _OFFICIAL_GUI_EXECUTABLES:
+        return True
+    if not cmdline:
+        return False
+    exe = os.path.basename(cmdline[0])
+    if exe in _OFFICIAL_GUI_EXECUTABLES:
+        return True
+
+    # Covers development/packaging launches through `python -m ...`.
+    for i, token in enumerate(cmdline[:-1]):
+        if token == "-m" and cmdline[i + 1].startswith(_OFFICIAL_GUI_MODULE_PREFIX):
+            return True
+    return False
 
 
 # -------- 1) Interface detector (primary connection signal) -----------

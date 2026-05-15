@@ -31,6 +31,10 @@ vpnpilot is a UI wrapper around the official Proton CLI. It does not implement
 VPN tunneling, killswitch policy, DNS leak protection, split tunneling, or VPN
 security controls on its own.
 
+City targeting is limited by the Proton CLI `--city` behavior. vpnpilot stores
+country+city context in presets for clarity, but actual city connects remain
+best-effort unless you use an exact server ID.
+
 ## Install (RPM)
 
 ```sh

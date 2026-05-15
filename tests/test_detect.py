@@ -12,6 +12,7 @@ from vpnpilot.detect import (
     CLIStatusDetector,
     CompositeDetector,
     InterfaceDetector,
+    detect_official_proton_gui_processes,
 )
 from vpnpilot.state import AuthState, ConnState
 
@@ -226,3 +227,62 @@ async def test_composite_unknown_auth_when_info_fails(tmp_path):
     composite = make_composite(sysfs, cli=cli)
     info = await composite.detect()
     assert info.auth is AuthState.UNKNOWN
+
+
+def _write_fake_proc_task(
+    proc_root: Path,
+    pid: int,
+    *,
+    cmdline: list[str] | None,
+    comm: str | None,
+) -> None:
+    task_dir = proc_root / str(pid)
+    task_dir.mkdir(parents=True, exist_ok=True)
+    if cmdline is not None:
+        raw = "\x00".join(cmdline).encode("utf-8") + b"\x00"
+        (task_dir / "cmdline").write_bytes(raw)
+    if comm is not None:
+        (task_dir / "comm").write_text(comm + "\n")
+
+
+def test_detect_official_gui_processes_matches_protonvpn_app(tmp_path):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    _write_fake_proc_task(proc_root, 111, cmdline=["protonvpn-app"], comm="protonvpn-app")
+    _write_fake_proc_task(proc_root, 222, cmdline=["protonvpn"], comm="protonvpn")
+
+    pids = detect_official_proton_gui_processes(proc_root=str(proc_root), exclude_pid=99999)
+    assert pids == [111]
+
+
+def test_detect_official_gui_processes_matches_python_module_launch(tmp_path):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    _write_fake_proc_task(
+        proc_root,
+        333,
+        cmdline=["python3", "-m", "proton.vpn.app.gtk.__main__"],
+        comm="python3",
+    )
+
+    pids = detect_official_proton_gui_processes(proc_root=str(proc_root), exclude_pid=99999)
+    assert pids == [333]
+
+
+def test_detect_official_gui_processes_ignores_non_matching_processes(tmp_path):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    _write_fake_proc_task(proc_root, 444, cmdline=["protonvpn"], comm="protonvpn")
+    _write_fake_proc_task(proc_root, 445, cmdline=["python3", "-m", "http.server"], comm="python3")
+
+    pids = detect_official_proton_gui_processes(proc_root=str(proc_root), exclude_pid=99999)
+    assert pids == []
+
+
+def test_detect_official_gui_processes_excludes_given_pid(tmp_path):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    _write_fake_proc_task(proc_root, 555, cmdline=["protonvpn-app"], comm="protonvpn-app")
+
+    pids = detect_official_proton_gui_processes(proc_root=str(proc_root), exclude_pid=555)
+    assert pids == []

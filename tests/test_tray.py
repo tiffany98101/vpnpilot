@@ -190,3 +190,47 @@ def test_disconnect_action_visible_in_menu(qapp_instance, store):
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
     assert isinstance(tray._menu, QMenu)
     assert any(a.text() == "Disconnect" for a in tray._menu.actions())
+
+
+def test_official_gui_conflict_warns_once_per_pid_set(qapp_instance, store):
+    ctrl = FakeController()
+    tray = TrayApp(
+        qapp_instance,
+        ctrl,
+        preset_store=store,
+        official_gui_detector=lambda: [],
+    )
+    tray._gui_conflict_timer.stop()
+    tray._show_warning = MagicMock()
+
+    tray._official_gui_detector = lambda: [4242]
+    tray._check_official_gui_conflict()
+    tray._check_official_gui_conflict()
+
+    assert tray._show_warning.call_count == 1
+    assert "GUI appears to be running" in tray._show_warning.call_args.args[0]
+
+
+def test_official_gui_conflict_warning_rearms_after_process_exits(qapp_instance, store):
+    ctrl = FakeController()
+    state = {"pids": [4242]}
+
+    def detector():
+        return state["pids"]
+
+    tray = TrayApp(
+        qapp_instance,
+        ctrl,
+        preset_store=store,
+        official_gui_detector=detector,
+    )
+    tray._gui_conflict_timer.stop()
+    tray._show_warning = MagicMock()
+
+    tray._check_official_gui_conflict()  # first warning
+    state["pids"] = []
+    tray._check_official_gui_conflict()  # clears seen set
+    state["pids"] = [4242]
+    tray._check_official_gui_conflict()  # warns again
+
+    assert tray._show_warning.call_count == 2

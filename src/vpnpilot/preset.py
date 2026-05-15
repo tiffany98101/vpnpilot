@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 import uuid
 from dataclasses import dataclass, field, replace
@@ -106,6 +107,41 @@ def _seed_preset() -> Preset:
 # ---- serialization ----------------------------------------------------
 
 _STORE_VERSION = 1
+_CITY_SCOPE_SEP = "::"
+_COUNTRY_CODE_RE = re.compile(r"^[A-Z]{2}$")
+
+
+def encode_city_target(city: str, country_code: str | None = None) -> str:
+    """Encode a city target with optional country scope metadata.
+
+    Stored format is "<CC>::<City>" when a 2-letter country code is
+    present; legacy unscoped values remain plain "<City>".
+    """
+    clean_city = city.strip()
+    if not clean_city:
+        raise ValueError("city target requires a non-empty city")
+    clean_code = (country_code or "").strip().upper()
+    if clean_code and _COUNTRY_CODE_RE.fullmatch(clean_code):
+        return f"{clean_code}{_CITY_SCOPE_SEP}{clean_city}"
+    return clean_city
+
+
+def decode_city_target(value: str) -> tuple[str | None, str]:
+    """Decode a city target value into (country_code, city).
+
+    Accepts both scoped values ("US::Seattle") and legacy unscoped values
+    ("Seattle"). Malformed scoped values are treated as unscoped.
+    """
+    raw = value.strip()
+    if not raw:
+        return None, ""
+    head, sep, tail = raw.partition(_CITY_SCOPE_SEP)
+    if sep:
+        code = head.strip().upper()
+        city = tail.strip()
+        if city and _COUNTRY_CODE_RE.fullmatch(code):
+            return code, city
+    return None, raw
 
 
 def preset_to_dict(p: Preset) -> dict:
@@ -392,7 +428,8 @@ def preset_to_connect_kwargs(preset: Preset) -> dict:
     if t.kind is TargetKind.COUNTRY:
         kwargs["country"] = t.value
     elif t.kind is TargetKind.CITY:
-        kwargs["city"] = t.value
+        _country_code, city = decode_city_target(t.value)
+        kwargs["city"] = city
     elif t.kind is TargetKind.SERVER_ID:
         kwargs["server_id"] = t.value
     f = preset.flags

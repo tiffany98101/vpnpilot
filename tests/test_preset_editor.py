@@ -229,6 +229,23 @@ def test_city_combobox_populates_when_country_selected(qapp_instance, qtbot):
     assert "Frankfurt" in city_texts
 
 
+def test_city_value_is_scoped_when_country_selected(qapp_instance, qtbot):
+    cat = FakeCatalog(countries=_COUNTRIES)
+    cat.set_entry_loaded("DE", _DE_CITIES)
+    dlg = PresetEditorDialog(preset=None, taken_names=set(), catalog=cat)
+    qtbot.addWidget(dlg)
+    for i in range(dlg.kind_combo.count()):
+        if dlg.kind_combo.itemData(i) is TargetKind.CITY:
+            dlg.kind_combo.setCurrentIndex(i)
+            break
+    for i in range(dlg.country_combo.count()):
+        if dlg.country_combo.itemData(i) == "DE":
+            dlg.country_combo.setCurrentIndex(i)
+            break
+    dlg.city_combo.setEditText("Berlin")
+    assert dlg._current_value() == "DE::Berlin"
+
+
 def test_country_value_from_catalog_returns_code(qapp_instance, qtbot):
     cat = FakeCatalog(countries=_COUNTRIES)
     dlg = PresetEditorDialog(preset=None, taken_names=set(), catalog=cat)
@@ -281,6 +298,20 @@ def test_existing_preset_city_free_text_when_country_unknown(qapp_instance, qtbo
     # City combo should have "Seattle" as free-text.
     assert dlg.city_combo.currentText() == "Seattle"
     assert dlg._current_value() == "Seattle"
+
+
+def test_existing_scoped_city_preset_prefills_country_and_city(qapp_instance, qtbot):
+    cat = FakeCatalog(countries=_COUNTRIES)
+    cat.set_entry_loaded("DE", _DE_CITIES)
+    existing = Preset.new(
+        name="Berlin",
+        target=PresetTarget(kind=TargetKind.CITY, value="DE::Berlin"),
+    )
+    dlg = PresetEditorDialog(preset=existing, taken_names=set(), catalog=cat)
+    qtbot.addWidget(dlg)
+    assert dlg._resolved_country_code() == "DE"
+    assert dlg.city_combo.currentText() == "Berlin"
+    assert dlg._current_value() == "DE::Berlin"
 
 
 def test_catalog_changed_updates_country_combobox(qapp_instance, qtbot):

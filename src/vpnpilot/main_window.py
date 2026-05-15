@@ -32,7 +32,13 @@ from . import APP_NAME
 from .browser import BrowseTab
 from .catalog import ServerCatalog
 from .controller import Controller
-from .preset import Preset, PresetStore, PresetTarget, TargetKind
+from .preset import (
+    Preset,
+    PresetStore,
+    PresetTarget,
+    TargetKind,
+    decode_city_target,
+)
 from .preset_editor import PresetEditorDialog
 from .state import AuthState, ConnectionInfo, ConnState
 
@@ -123,7 +129,10 @@ def target_summary(target: PresetTarget) -> str:
     if target.kind is TargetKind.COUNTRY:
         return f"country {target.value}"
     if target.kind is TargetKind.CITY:
-        return f"city {target.value}"
+        country_code, city = decode_city_target(target.value)
+        if country_code:
+            return f"city {city} ({country_code}, best effort)"
+        return f"city {city} (best effort)"
     if target.kind is TargetKind.SERVER_ID:
         return f"server {target.value}"
     return ""
@@ -165,7 +174,8 @@ def preset_matches_connection(preset: Preset, info: ConnectionInfo) -> bool:
     if t.kind is TargetKind.SERVER_ID:
         return (info.server or "") == t.value
     if t.kind is TargetKind.CITY:
-        return (info.city or "").casefold() == t.value.casefold()
+        _country_code, city = decode_city_target(t.value)
+        return (info.city or "").casefold() == city.casefold()
     return False
 
 
