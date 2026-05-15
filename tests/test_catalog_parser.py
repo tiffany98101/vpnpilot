@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from vpnpilot.catalog.models import CityFeature
 from vpnpilot.catalog.parser import parse_cities, parse_countries
 
