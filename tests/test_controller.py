@@ -28,6 +28,19 @@ class ScriptedDetector(Detector):
         return self.answers[i]
 
 
+class BlockingDetector(Detector):
+    def __init__(self) -> None:
+        self.calls = 0
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def detect(self) -> ConnectionInfo:
+        self.calls += 1
+        self.started.set()
+        await self.release.wait()
+        return ConnectionInfo(state=ConnState.DISCONNECTED)
+
+
 class ScriptedCLI(ProtonCLI):
     def __init__(self, *, connect_result: CLIResult, disconnect_result: CLIResult):
         self._connect_result = connect_result
@@ -97,6 +110,27 @@ async def test_disconnect_calls_cli(qapp):
         if ctrl._in_flight and ctrl._in_flight.done():
             break
     assert cli.disconnect_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_overlapping_refreshes_share_one_detector_call(qapp):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = BlockingDetector()
+    ctrl = Controller(cli, detector)
+
+    first = asyncio.create_task(ctrl._refresh_state())
+    await detector.started.wait()
+    second = asyncio.create_task(ctrl._refresh_state())
+    await asyncio.sleep(0)
+
+    assert detector.calls == 1
+
+    detector.release.set()
+    await asyncio.gather(first, second)
+    assert detector.calls == 1
 
 
 @pytest.mark.asyncio

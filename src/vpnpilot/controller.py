@@ -47,6 +47,7 @@ class Controller(QObject):
         self._current = ConnectionInfo(state=ConnState.DISCONNECTED)
         self._in_flight: asyncio.Task | None = None
         self._poll_task: asyncio.Task | None = None
+        self._refresh_task: asyncio.Task | None = None
         self._stopping = asyncio.Event()
 
     @property
@@ -61,6 +62,8 @@ class Controller(QObject):
         self._stopping.set()
         if self._poll_task is not None:
             self._poll_task.cancel()
+        if self._refresh_task is not None:
+            self._refresh_task.cancel()
 
     # ----- public actions -----
 
@@ -168,6 +171,19 @@ class Controller(QObject):
         await self._refresh_state()
 
     async def _refresh_state(self) -> None:
+        if self._refresh_task is not None and not self._refresh_task.done():
+            await asyncio.shield(self._refresh_task)
+            return
+        self._refresh_task = asyncio.create_task(
+            self._run_refresh_state(), name="vpnpilot-refresh"
+        )
+        try:
+            await asyncio.shield(self._refresh_task)
+        finally:
+            if self._refresh_task is not None and self._refresh_task.done():
+                self._refresh_task = None
+
+    async def _run_refresh_state(self) -> None:
         try:
             info = await self._detector.detect()
         except Exception:  # noqa: BLE001

@@ -109,11 +109,13 @@ async def test_catalog_and_info_commands_use_bounded_timeouts():
 
     cli = RecordingCLI()
 
+    await cli.status()
     await cli.info()
     await cli.countries_list()
     await cli.cities_list("BY")
 
     assert cli.calls == [
+        (("status",), 10.0),
         (("info",), 10.0),
         (("countries", "list"), 10.0),
         (("cities", "list", "BY"), 10.0),

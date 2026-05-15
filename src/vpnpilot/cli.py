@@ -80,9 +80,7 @@ class ProtonCLI:
         )
 
     async def status(self) -> CLIResult:
-        # status can be slow the first time after a state change because the
-        # CLI may refresh the server list; allow extra timeout.
-        return await self._run("status", timeout=max(self._timeout, 15.0))
+        return await self._run("status", timeout=10.0)
 
     async def disconnect(self) -> CLIResult:
         return await self._run("disconnect")
