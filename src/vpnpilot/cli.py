@@ -9,6 +9,7 @@ CLI upgrade only touches the parser.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import shutil
 from collections.abc import Sequence
@@ -18,6 +19,8 @@ from .state import AuthState, ConnectionInfo, ConnState
 
 DEFAULT_TIMEOUT = 30.0  # seconds; status can take 10s+ on first call after a state change
 PROTONVPN_BIN = "protonvpn"
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -61,11 +64,14 @@ class ProtonCLI:
         try:
             stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=t)
         except TimeoutError:
+            log.warning("protonvpn command timed out after %.1fs: %s", t, " ".join(args))
             try:
                 proc.kill()
-                await proc.wait()
+                await asyncio.wait_for(proc.wait(), timeout=5.0)
             except ProcessLookupError:
                 pass
+            except TimeoutError:
+                log.warning("protonvpn command did not exit promptly after kill: %s", " ".join(args))
             return CLIResult(returncode=-1, stdout="", stderr=f"timed out after {t}s", timed_out=True)
         return CLIResult(
             returncode=proc.returncode or 0,
@@ -110,13 +116,13 @@ class ProtonCLI:
         return await self._run(*args, timeout=max(self._timeout, 30.0))
 
     async def info(self) -> CLIResult:
-        return await self._run("info")
+        return await self._run("info", timeout=10.0)
 
     async def countries_list(self) -> CLIResult:
-        return await self._run("countries", "list", timeout=max(self._timeout, 10.0))
+        return await self._run("countries", "list", timeout=10.0)
 
     async def cities_list(self, country_code: str) -> CLIResult:
-        return await self._run("cities", "list", country_code, timeout=max(self._timeout, 10.0))
+        return await self._run("cities", "list", country_code, timeout=10.0)
 
 
 # ---- Parsers (kept next to the format strings they target) -----------

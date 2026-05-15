@@ -79,7 +79,8 @@ def main() -> int:
     app.setWindowIcon(_app_icon())
 
     if not ensure_tray_available(app):
-        return 1
+        log.info("system tray unavailable; exiting without restart-worthy failure")
+        return 0
 
     if not ProtonCLI.is_installed():
         return _show_cli_missing(app)
@@ -108,20 +109,9 @@ def main() -> int:
 
     signal.signal(signal.SIGINT, _sigint)
 
-    # Start catalog prewarm after the first successful connection-state poll.
-    # This avoids contending with the autoconnect CLI call at startup.
-    _prewarm_started = False
-
-    def _on_first_state(_info):
-        nonlocal _prewarm_started
-        if not _prewarm_started:
-            _prewarm_started = True
-            catalog.prewarm()
-
-    controller.state_changed.connect(_on_first_state)
-
-    # Start polling once the loop is alive.
-    loop.call_soon(controller.start)
+    # Let the tray render before probing the Proton CLI. Catalog/city loading
+    # stays lazy and must be triggered by the browser or preset editor.
+    loop.call_later(5.0, controller.start)
 
     with loop:
         return loop.run_forever() or 0

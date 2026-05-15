@@ -94,3 +94,27 @@ def test_cliresult_ok():
     assert CLIResult(0, "", "").ok is True
     assert CLIResult(1, "", "boom").ok is False
     assert CLIResult(0, "", "", timed_out=True).ok is False
+
+
+@pytest.mark.asyncio
+async def test_catalog_and_info_commands_use_bounded_timeouts():
+    class RecordingCLI(ProtonCLI):
+        def __init__(self):
+            super().__init__(timeout=99.0)
+            self.calls = []
+
+        async def _run(self, *args, timeout=None):  # type: ignore[override]
+            self.calls.append((args, timeout))
+            return CLIResult(0, "", "")
+
+    cli = RecordingCLI()
+
+    await cli.info()
+    await cli.countries_list()
+    await cli.cities_list("BY")
+
+    assert cli.calls == [
+        (("info",), 10.0),
+        (("countries", "list"), 10.0),
+        (("cities", "list", "BY"), 10.0),
+    ]
