@@ -21,6 +21,8 @@ from .state import AuthState, ConnectionInfo, ConnState
 from .user_state import NullPersistence, Persistence
 
 _SERVER_ID_RE = re.compile(r"^[A-Z]{2}(-[A-Z]{2,3})?#\d+(-TOR)?$")
+POLL_INTERVAL_SECONDS = 120.0
+MIN_REFRESH_INTERVAL_SECONDS = 30.0
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +36,8 @@ class Controller(QObject):
         cli: ProtonCLI,
         detector: Detector,
         *,
-        poll_interval: float = 3.0,
+        poll_interval: float = POLL_INTERVAL_SECONDS,
+        min_refresh_interval: float = MIN_REFRESH_INTERVAL_SECONDS,
         persistence: Persistence | None = None,
         preset_store: PresetStore | None = None,
     ) -> None:
@@ -42,12 +45,14 @@ class Controller(QObject):
         self._cli = cli
         self._detector = detector
         self._poll_interval = poll_interval
+        self._min_refresh_interval = min_refresh_interval
         self._persistence = persistence or NullPersistence()
         self._preset_store = preset_store
         self._current = ConnectionInfo(state=ConnState.DISCONNECTED)
         self._in_flight: asyncio.Task | None = None
         self._poll_task: asyncio.Task | None = None
         self._refresh_task: asyncio.Task | None = None
+        self._last_refresh_started_at: float | None = None
         self._stopping = asyncio.Event()
 
     @property
@@ -145,14 +150,14 @@ class Controller(QObject):
         if not result.ok:
             self.error_occurred.emit(_short_err(result))
         # Force an immediate detection pass so we don't wait for the next poll tick.
-        await self._refresh_state()
+        await self._refresh_state(force=True)
 
     async def _do_disconnect(self) -> None:
         self._set(ConnectionInfo(state=ConnState.TRANSITIONING))
         result = await self._cli.disconnect()
         if not result.ok:
             self.error_occurred.emit(_short_err(result))
-        await self._refresh_state()
+        await self._refresh_state(force=True)
 
     async def _poll_loop(self) -> None:
         try:
@@ -170,10 +175,20 @@ class Controller(QObject):
             return
         await self._refresh_state()
 
-    async def _refresh_state(self) -> None:
+    async def _refresh_state(self, *, force: bool = False) -> None:
         if self._refresh_task is not None and not self._refresh_task.done():
             await asyncio.shield(self._refresh_task)
             return
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        if (
+            not force
+            and self._last_refresh_started_at is not None
+            and now - self._last_refresh_started_at < self._min_refresh_interval
+        ):
+            log.debug("refresh skipped: cooldown active")
+            return
+        self._last_refresh_started_at = now
         self._refresh_task = asyncio.create_task(
             self._run_refresh_state(), name="vpnpilot-refresh"
         )

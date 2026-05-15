@@ -131,5 +131,7 @@ def test_main_does_not_prewarm_catalog_or_load_cities_on_startup(monkeypatch):
     assert FakeCatalog.instances[0].prewarm_called is False
     assert FakeCatalog.instances[0].cities_calls == []
     assert len(FakeController.instances[0].state_changed.callbacks) == 0
-    assert loops[0].delayed_calls == [(5.0, FakeController.instances[0].start, ())]
+    assert loops[0].delayed_calls == [
+        (app_mod.STARTUP_POLL_DELAY_SECONDS, FakeController.instances[0].start, ())
+    ]
     assert FakeController.instances[0].started is False

@@ -26,6 +26,8 @@ from .user_state import JsonStateStore
 
 log = logging.getLogger(__name__)
 
+STARTUP_POLL_DELAY_SECONDS = 30.0
+
 
 def _app_icon() -> QIcon:
     return QIcon(str(files("vpnpilot.resources").joinpath("icon-app.svg")))
@@ -111,7 +113,7 @@ def main() -> int:
 
     # Let the tray render before probing the Proton CLI. Catalog/city loading
     # stays lazy and must be triggered by the browser or preset editor.
-    loop.call_later(5.0, controller.start)
+    loop.call_later(STARTUP_POLL_DELAY_SECONDS, controller.start)
 
     with loop:
         return loop.run_forever() or 0

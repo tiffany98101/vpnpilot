@@ -9,7 +9,11 @@ import pytest
 from PyQt6.QtCore import QCoreApplication
 
 from vpnpilot.cli import CLIResult, ProtonCLI
-from vpnpilot.controller import Controller
+from vpnpilot.controller import (
+    MIN_REFRESH_INTERVAL_SECONDS,
+    POLL_INTERVAL_SECONDS,
+    Controller,
+)
 from vpnpilot.detect import Detector
 from vpnpilot.preset import PresetFlags, PresetStore, PresetTarget, TargetKind
 from vpnpilot.state import AuthState, ConnectionInfo, ConnState
@@ -131,6 +135,49 @@ async def test_overlapping_refreshes_share_one_detector_call(qapp):
     detector.release.set()
     await asyncio.gather(first, second)
     assert detector.calls == 1
+
+
+def test_default_polling_is_conservative(qapp):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    ctrl = Controller(cli, detector)
+
+    assert ctrl._poll_interval == POLL_INTERVAL_SECONDS
+    assert ctrl._min_refresh_interval == MIN_REFRESH_INTERVAL_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_completed_refreshes_are_rate_limited(qapp):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    ctrl = Controller(cli, detector, min_refresh_interval=30.0)
+
+    await ctrl._refresh_state()
+    await ctrl._refresh_state()
+    await ctrl._refresh_state()
+
+    assert detector.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_forced_refresh_bypasses_rate_limit(qapp):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=ConnState.DISCONNECTED)])
+    ctrl = Controller(cli, detector, min_refresh_interval=30.0)
+
+    await ctrl._refresh_state()
+    await ctrl._refresh_state(force=True)
+
+    assert detector.calls == 2
 
 
 @pytest.mark.asyncio
