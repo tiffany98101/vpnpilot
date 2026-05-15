@@ -11,13 +11,15 @@ Repository: https://github.com/tiffany98101/vpnpilot
 
 ## Screenshots
 
-| Connected | Server browser |
-| --- | --- |
-| ![VPN Pilot connected state](docs/screenshots/connected.png) | ![VPN Pilot country and city browser](docs/screenshots/NewCity.png) |
+<p align="center">
+  <img src="docs/screenshots/connected.png" alt="VPN Pilot connected state" width="45%">
+  <img src="docs/screenshots/NewCity.png" alt="VPN Pilot country and city browser" width="45%">
+</p>
 
-| Tray menu | Tray status |
-| --- | --- |
-| ![VPN Pilot tray menu](docs/screenshots/tray.png) | ![VPN Pilot tray status](docs/screenshots/tray2.png) |
+<p align="center">
+  <img src="docs/screenshots/tray.png" alt="VPN Pilot tray menu" width="45%">
+  <img src="docs/screenshots/tray2.png" alt="VPN Pilot tray status" width="45%">
+</p>
 
 ## Current Features
 
