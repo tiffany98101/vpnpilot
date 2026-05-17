@@ -18,7 +18,7 @@ from .detect import detect_official_proton_gui_processes
 from .diagnostics import collect_diagnostics
 from .main_window import MainWindow
 from .paths import default_log_path
-from .preset import PresetStore
+from .preset import Preset, PresetStore
 from .setup_help import help_for_status
 from .setup_help_dialog import SetupHelpDialog
 from .signin_panel import SignInPanel
@@ -27,6 +27,10 @@ from .user_state import NullPersistence, Persistence
 
 log = logging.getLogger(__name__)
 _GUI_CONFLICT_POLL_MS = 15000
+
+
+def _preset_menu_label(preset: Preset) -> str:
+    return f"★ {preset.name}" if preset.is_default else preset.name
 
 
 def _icon(name: str) -> QIcon:
@@ -194,7 +198,6 @@ class TrayApp:
             return
 
         default = presets[0]
-        non_default = presets[1:]
 
         connect_default = QAction(f"Connect to {default.name}", self._menu)
         default_id = default.id
@@ -204,17 +207,16 @@ class TrayApp:
         self._menu.insertAction(self._disconnect_action, connect_default)
         self._dynamic_actions.append(connect_default)
 
-        if non_default:
-            submenu = QMenu("Connect to…", self._menu)
-            for p in non_default:
-                act = submenu.addAction(p.name)
-                pid = p.id
-                act.triggered.connect(
-                    lambda checked=False, x=pid: self._controller.connect_preset(x)
-                )
-            submenu_action = self._menu.insertMenu(self._disconnect_action, submenu)
-            self._dynamic_actions.append(submenu_action)
-            self._connect_submenu = submenu
+        submenu = QMenu("Connect to…", self._menu)
+        for p in presets:
+            act = submenu.addAction(_preset_menu_label(p))
+            pid = p.id
+            act.triggered.connect(
+                lambda checked=False, x=pid: self._controller.connect_preset(x)
+            )
+        submenu_action = self._menu.insertMenu(self._disconnect_action, submenu)
+        self._dynamic_actions.append(submenu_action)
+        self._connect_submenu = submenu
 
         # Apply current-state enable/disable to the freshly-built actions.
         self._apply_state_to_dynamic_actions(self._controller.current)

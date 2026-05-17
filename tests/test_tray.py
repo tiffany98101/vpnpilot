@@ -7,6 +7,7 @@ what matters.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -43,6 +44,29 @@ def qapp_instance():
 
 @pytest.fixture
 def store(tmp_path):
+    path = tmp_path / "presets.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "presets": [
+                    {
+                        "id": "preset-a",
+                        "name": "Preset A",
+                        "target": {"kind": "none", "value": ""},
+                        "flags": {
+                            "p2p": False,
+                            "secure_core": False,
+                            "tor": False,
+                            "random": False,
+                        },
+                        "is_default": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     s = PresetStore(path=tmp_path / "presets.json")
     s.load()
     return s
@@ -52,62 +76,81 @@ def _connect_action_texts(tray: TrayApp) -> list[str]:
     return [a.text() for a in tray._dynamic_actions]
 
 
-def test_initial_menu_has_default_connect_only_with_one_preset(qapp_instance, store):
+def _submenu_texts(tray: TrayApp) -> list[str]:
+    assert tray._connect_submenu is not None
+    return [a.text() for a in tray._connect_submenu.actions()]
+
+
+def test_initial_menu_has_default_quick_action_and_submenu_entry(qapp_instance, store):
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
-    assert _connect_action_texts(tray) == ["Connect to Seattle"]
-    assert tray._connect_submenu is None
+    assert _connect_action_texts(tray) == ["Connect to Preset A", "Connect to…"]
+    assert _submenu_texts(tray) == ["★ Preset A"]
 
 
 def test_menu_grows_submenu_when_more_presets(qapp_instance, store):
-    store.add(name="NYC", target=PresetTarget(kind=TargetKind.CITY, value="New York"))
-    store.add(name="LA", target=PresetTarget(kind=TargetKind.CITY, value="Los Angeles"))
+    store.add(name="Preset B", target=PresetTarget(kind=TargetKind.NONE))
+    store.add(name="Preset C", target=PresetTarget(kind=TargetKind.NONE))
+    store.add(name="Fastest Available", target=PresetTarget(kind=TargetKind.NONE))
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
-    # Top action is the default; submenu has the other two.
-    assert _connect_action_texts(tray)[0] == "Connect to Seattle"
-    assert tray._connect_submenu is not None
-    submenu_texts = [a.text() for a in tray._connect_submenu.actions()]
-    assert set(submenu_texts) == {"NYC", "LA"}
+    assert _connect_action_texts(tray)[0] == "Connect to Preset A"
+    assert _submenu_texts(tray) == [
+        "★ Preset A",
+        "Preset B",
+        "Preset C",
+        "Fastest Available",
+    ]
 
 
 def test_clicking_default_connect_routes_to_controller(qapp_instance, store):
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
-    seattle = store.list_all()[0]
+    default = store.list_all()[0]
     tray._dynamic_actions[0].trigger()
-    ctrl.connect_preset.assert_called_once_with(seattle.id)
+    ctrl.connect_preset.assert_called_once_with(default.id)
 
 
 def test_clicking_submenu_item_routes_to_controller(qapp_instance, store):
-    nyc = store.add(name="NYC", target=PresetTarget(kind=TargetKind.CITY, value="New York"))
+    preset_b = store.add(name="Preset B", target=PresetTarget(kind=TargetKind.NONE))
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
     assert tray._connect_submenu is not None
-    nyc_action = next(a for a in tray._connect_submenu.actions() if a.text() == "NYC")
-    nyc_action.trigger()
-    ctrl.connect_preset.assert_called_once_with(nyc.id)
+    action = next(a for a in tray._connect_submenu.actions() if a.text() == "Preset B")
+    action.trigger()
+    ctrl.connect_preset.assert_called_once_with(preset_b.id)
+
+
+def test_clicking_default_submenu_item_routes_to_controller(qapp_instance, store):
+    ctrl = FakeController()
+    tray = TrayApp(qapp_instance, ctrl, preset_store=store)
+    default = store.list_all()[0]
+    action = next(a for a in tray._connect_submenu.actions() if a.text() == "★ Preset A")
+    action.trigger()
+    ctrl.connect_preset.assert_called_once_with(default.id)
 
 
 def test_rebuild_after_preset_added(qapp_instance, store):
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
-    assert len(tray._dynamic_actions) == 1
-    assert tray._connect_submenu is None
-    store.add(name="NYC", target=PresetTarget(kind=TargetKind.CITY, value="New York"))
+    assert len(tray._dynamic_actions) == 2
+    assert _submenu_texts(tray) == ["★ Preset A"]
+    store.add(name="Preset B", target=PresetTarget(kind=TargetKind.NONE))
     tray._rebuild_connect_section()
     assert tray._connect_submenu is not None
-    assert _connect_action_texts(tray)[0] == "Connect to Seattle"
+    assert _connect_action_texts(tray)[0] == "Connect to Preset A"
+    assert _submenu_texts(tray) == ["★ Preset A", "Preset B"]
 
 
 def test_rebuild_after_set_default_swaps_top_entry(qapp_instance, store):
-    nyc = store.add(name="NYC", target=PresetTarget(kind=TargetKind.CITY, value="New York"))
+    preset_b = store.add(name="Preset B", target=PresetTarget(kind=TargetKind.NONE))
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
-    assert _connect_action_texts(tray)[0] == "Connect to Seattle"
-    store.set_default(nyc.id)
+    assert _connect_action_texts(tray)[0] == "Connect to Preset A"
+    store.set_default(preset_b.id)
     tray._rebuild_connect_section()
-    assert _connect_action_texts(tray)[0] == "Connect to NYC"
+    assert _connect_action_texts(tray)[0] == "Connect to Preset B"
+    assert _submenu_texts(tray) == ["★ Preset B", "Preset A"]
 
 
 def test_dynamic_actions_disabled_when_signed_out(qapp_instance, store):
@@ -161,7 +204,7 @@ def test_menu_structure_has_expected_top_level_items(qapp_instance, store):
     assert "Troubleshooting / Setup Help" in texts
     assert "Copy Diagnostic Info" in texts
     assert "Open Log" in texts
-    assert "Connect to Seattle" in texts
+    assert "Connect to Preset A" in texts
     assert "Disconnect" in texts
     assert "Quit" in texts
 
@@ -196,12 +239,11 @@ def test_refresh_interval_menu_updates_controller(qapp_instance, store):
 def test_about_to_show_signal_triggers_rebuild(qapp_instance, store):
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
-    initial_count = len(tray._dynamic_actions)
     # Add a preset and emit aboutToShow — should rebuild.
-    store.add(name="NYC", target=PresetTarget(kind=TargetKind.CITY, value="New York"))
+    store.add(name="Preset B", target=PresetTarget(kind=TargetKind.NONE))
     tray._menu.aboutToShow.emit()
     assert tray._connect_submenu is not None
-    assert len(tray._dynamic_actions) > initial_count
+    assert _submenu_texts(tray) == ["★ Preset A", "Preset B"]
 
 
 def test_disconnect_action_visible_in_menu(qapp_instance, store):
