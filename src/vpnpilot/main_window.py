@@ -8,13 +8,15 @@ the sign-in flow.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from importlib.resources import files
 
-from PyQt6.QtCore import QAbstractListModel, QModelIndex, Qt
-from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import QAbstractListModel, QModelIndex, Qt, QUrl
+from PyQt6.QtGui import QDesktopServices, QIcon
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -32,6 +34,8 @@ from . import APP_NAME
 from .browser import BrowseTab
 from .catalog import ServerCatalog
 from .controller import Controller
+from .diagnostics import collect_diagnostics
+from .paths import default_log_path
 from .preset import (
     Preset,
     PresetStore,
@@ -40,6 +44,8 @@ from .preset import (
     decode_city_target,
 )
 from .preset_editor import PresetEditorDialog
+from .setup_help import help_for_status
+from .setup_help_dialog import SetupHelpDialog
 from .state import AuthState, ConnectionInfo, ConnState
 
 log = logging.getLogger(__name__)
@@ -411,6 +417,8 @@ class MainWindow(QMainWindow):
         self._controller = controller
         self._preset_store = preset_store
         self._catalog = catalog
+        self._diagnostics_task: asyncio.Task | None = None
+        self._setup_help_dialog: SetupHelpDialog | None = None
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -443,6 +451,10 @@ class MainWindow(QMainWindow):
 
         footer = QHBoxLayout()
         footer.addStretch(1)
+        self.setup_help_btn = QPushButton("Troubleshooting…")
+        self.setup_help_btn.setObjectName("setupHelpButton")
+        self.setup_help_btn.clicked.connect(self._open_setup_help)
+        footer.addWidget(self.setup_help_btn)
         self.disconnect_btn = QPushButton("Disconnect")
         self.disconnect_btn.setObjectName("disconnectButton")
         self.disconnect_btn.setEnabled(False)
@@ -471,6 +483,52 @@ class MainWindow(QMainWindow):
 
     def _on_disconnect(self) -> None:
         self._controller.disconnect()
+
+    def _open_setup_help(self) -> None:
+        item = help_for_status(
+            self._controller.current,
+            last_error=self._controller.last_error,
+            has_presets=bool(self._preset_store.list_all()),
+        )
+        self._setup_help_dialog = SetupHelpDialog(
+            item,
+            on_copy_diagnostics=self._copy_diagnostic_info,
+            on_open_log=self._open_log,
+            parent=self,
+        )
+        self._setup_help_dialog.show()
+        self._setup_help_dialog.raise_()
+        self._setup_help_dialog.activateWindow()
+
+    def _copy_diagnostic_info(self) -> None:
+        if self._diagnostics_task is not None and not self._diagnostics_task.done():
+            return
+        self._diagnostics_task = asyncio.create_task(self._collect_and_copy_diagnostics())
+
+    async def _collect_and_copy_diagnostics(self) -> None:
+        try:
+            text = await collect_diagnostics(last_error=self._controller.last_error)
+            QApplication.clipboard().setText(text)
+        except Exception as e:  # noqa: BLE001
+            log.exception("could not copy diagnostic info")
+            QMessageBox.warning(self, "Could not copy diagnostics", str(e))
+        else:
+            QMessageBox.information(
+                self, "Diagnostics copied", "Diagnostic info copied to clipboard."
+            )
+
+    def _open_log(self) -> None:
+        log_path = default_log_path()
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.touch(exist_ok=True)
+            opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_path)))
+        except OSError as e:
+            log.exception("could not open log")
+            QMessageBox.warning(self, "Could not open log", str(e))
+            return
+        if not opened:
+            QMessageBox.information(self, "VPNPilot log", f"Log file: {log_path}")
 
     def _on_preset_connect(self, preset: Preset) -> None:
         self._controller.connect_preset(preset.id)

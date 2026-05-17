@@ -158,6 +158,7 @@ def test_menu_structure_has_expected_top_level_items(qapp_instance, store):
     assert any("Open VPNPilot" in t for t in texts)
     assert "Refresh now" in texts
     assert "Refresh interval" in texts
+    assert "Troubleshooting / Setup Help" in texts
     assert "Copy Diagnostic Info" in texts
     assert "Open Log" in texts
     assert "Connect to Seattle" in texts

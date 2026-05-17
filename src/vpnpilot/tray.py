@@ -19,6 +19,8 @@ from .diagnostics import collect_diagnostics
 from .main_window import MainWindow
 from .paths import default_log_path
 from .preset import PresetStore
+from .setup_help import help_for_status
+from .setup_help_dialog import SetupHelpDialog
 from .signin_panel import SignInPanel
 from .state import AuthState, ConnectionInfo, ConnState
 from .user_state import NullPersistence, Persistence
@@ -56,6 +58,7 @@ class TrayApp:
         self._tray.setToolTip(f"{APP_NAME} {__version__}")
         self._signin_panel: SignInPanel | None = None
         self._main_window: MainWindow | None = None
+        self._setup_help_dialog: SetupHelpDialog | None = None
         self._gui_conflict_timer = QTimer(self._tray)
         self._gui_conflict_timer.setInterval(_GUI_CONFLICT_POLL_MS)
         self._gui_conflict_timer.timeout.connect(self._check_official_gui_conflict)
@@ -126,6 +129,10 @@ class TrayApp:
         self._sync_refresh_interval_menu()
 
         self._menu.addSeparator()
+
+        self._setup_help_action = QAction("Troubleshooting / Setup Help")
+        self._setup_help_action.triggered.connect(self._open_setup_help)
+        self._menu.addAction(self._setup_help_action)
 
         self._copy_diagnostics_action = QAction("Copy Diagnostic Info")
         self._copy_diagnostics_action.triggered.connect(self._copy_diagnostic_info)
@@ -289,6 +296,21 @@ class TrayApp:
         if not opened:
             log.warning("desktop service refused to open log: %s", log_path)
             self._show_warning(f"Log file: {log_path}", duration_ms=7000)
+
+    def _open_setup_help(self) -> None:
+        item = help_for_status(
+            self._controller.current,
+            last_error=self._controller.last_error,
+            has_presets=bool(self._preset_store.list_all()),
+        )
+        self._setup_help_dialog = SetupHelpDialog(
+            item,
+            on_copy_diagnostics=self._copy_diagnostic_info,
+            on_open_log=self._open_log,
+        )
+        self._setup_help_dialog.show()
+        self._setup_help_dialog.raise_()
+        self._setup_help_dialog.activateWindow()
 
     def _check_official_gui_conflict(self) -> None:
         """Show a warning when the official Proton GUI is likely running."""

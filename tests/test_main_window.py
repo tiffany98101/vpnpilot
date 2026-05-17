@@ -30,6 +30,7 @@ class FakeController(QObject):
     def __init__(self) -> None:
         super().__init__()
         self.current = ConnectionInfo(state=ConnState.DISCONNECTED)
+        self.last_error = None
         self.disconnect = MagicMock()
         self.connect_preset = MagicMock()
 
@@ -84,9 +85,7 @@ def test_status_panel_signed_out_shows_auth_indicator(qapp_instance, qtbot):
     panel = StatusPanel()
     qtbot.addWidget(panel)
     panel.show()
-    panel.render(
-        ConnectionInfo(state=ConnState.DISCONNECTED, auth=AuthState.SIGNED_OUT)
-    )
+    panel.render(ConnectionInfo(state=ConnState.DISCONNECTED, auth=AuthState.SIGNED_OUT))
     assert panel.auth_label.isVisible()
 
 
@@ -106,6 +105,7 @@ def test_main_window_renders_initial_state(qapp_instance, qtbot, store):
     qtbot.addWidget(win)
     assert "Disconnected" in win.status_panel.state_label.text()
     assert win.disconnect_btn.isEnabled() is False
+    assert win.setup_help_btn.text() == "Troubleshooting…"
 
 
 def test_main_window_enables_disconnect_when_connected(qapp_instance, qtbot, store):
@@ -126,9 +126,7 @@ def test_main_window_disconnect_button_calls_controller(qapp_instance, qtbot, st
     ctrl = FakeController()
     win = MainWindow(ctrl, store)
     qtbot.addWidget(win)
-    ctrl.state_changed.emit(
-        ConnectionInfo(state=ConnState.CONNECTED, server="US-WA#187")
-    )
+    ctrl.state_changed.emit(ConnectionInfo(state=ConnState.CONNECTED, server="US-WA#187"))
     win.disconnect_btn.click()
     ctrl.disconnect.assert_called_once()
 
@@ -168,17 +166,13 @@ def test_main_window_close_hides_instead_of_destroying(qapp_instance, qtbot, sto
 
 def test_target_summary_kinds():
     assert target_summary(PresetTarget(kind=TargetKind.NONE)) == "fastest available"
-    assert (
-        target_summary(PresetTarget(kind=TargetKind.COUNTRY, value="US"))
-        == "country US"
-    )
+    assert target_summary(PresetTarget(kind=TargetKind.COUNTRY, value="US")) == "country US"
     assert (
         target_summary(PresetTarget(kind=TargetKind.CITY, value="Seattle"))
         == "city Seattle (best effort)"
     )
     assert (
-        target_summary(PresetTarget(kind=TargetKind.SERVER_ID, value="US-WA#1"))
-        == "server US-WA#1"
+        target_summary(PresetTarget(kind=TargetKind.SERVER_ID, value="US-WA#1")) == "server US-WA#1"
     )
 
 
@@ -346,9 +340,7 @@ def test_panel_delete_default_button_disabled(qapp_instance, qtbot, store):
 
 
 def test_panel_delete_non_default(qapp_instance, qtbot, store, monkeypatch):
-    nyc = store.add(
-        name="NYC", target=PresetTarget(kind=TargetKind.CITY, value="New York")
-    )
+    nyc = store.add(name="NYC", target=PresetTarget(kind=TargetKind.CITY, value="New York"))
     panel, _ = _make_panel(qtbot, store)
     panel.refresh()
     # Select NYC (row 1 after seed).
@@ -366,9 +358,7 @@ def test_panel_delete_non_default(qapp_instance, qtbot, store, monkeypatch):
 
 
 def test_panel_set_default_promotes_and_moves_to_top(qapp_instance, qtbot, store):
-    nyc = store.add(
-        name="NYC", target=PresetTarget(kind=TargetKind.CITY, value="New York")
-    )
+    nyc = store.add(name="NYC", target=PresetTarget(kind=TargetKind.CITY, value="New York"))
     panel, _ = _make_panel(qtbot, store)
     panel.refresh()
     panel.list_view.setCurrentIndex(panel._model.index(1, 0))
@@ -392,9 +382,7 @@ def test_panel_edit_button_calls_callback(qapp_instance, qtbot, store):
     cbs["on_edit"].assert_called_once()
 
 
-def test_main_window_routes_preset_connect_to_controller(
-    qapp_instance, qtbot, store
-):
+def test_main_window_routes_preset_connect_to_controller(qapp_instance, qtbot, store):
     ctrl = FakeController()
     win = MainWindow(ctrl, store)
     qtbot.addWidget(win)
