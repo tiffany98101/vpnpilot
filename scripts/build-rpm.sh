@@ -44,3 +44,7 @@ echo "Built RPM artifacts:"
 find "${HOME}/rpmbuild/RPMS" "${HOME}/rpmbuild/SRPMS" \
   -type f \( -name "${NAME}-${VERSION}-*.rpm" -o -name "${NAME}-${VERSION}-*.src.rpm" \) \
   -print | sort
+
+echo
+echo "To update the committed repo RPM:"
+echo "  cp ~/rpmbuild/RPMS/noarch/${NAME}-*.rpm dist/rpm/"

@@ -81,6 +81,31 @@ def test_rpm_build_script_exists_and_is_executable():
     assert "rpmspec" in text
     assert "git archive" in text
     assert "rpmbuild -ba" in text
+    assert "dist/rpm/" in text
+
+
+def test_prebuilt_rpm_exists_for_clone_installs():
+    rpm_dir = ROOT / "dist/rpm"
+    rpms = sorted(rpm_dir.glob("vpnpilot-*.rpm"))
+
+    assert rpm_dir.exists()
+    assert rpms
+
+
+def test_rpm_install_script_installs_prebuilt_rpm_only():
+    script = ROOT / "scripts/install-rpm.sh"
+    text = script.read_text(encoding="utf-8")
+
+    assert script.exists()
+    assert os.access(script, os.X_OK)
+    assert "set -euo pipefail" in text
+    assert "dist/rpm/vpnpilot-*.rpm" in text
+    assert "sudo dnf install" in text
+    assert "rpmbuild" not in text
+    assert not any(
+        line.strip().startswith(("pip ", "python -m pip", "python3 -m pip"))
+        for line in text.splitlines()
+    )
 
 
 def test_protonvpn_cli_fedora_helper_is_safe_and_executable():
@@ -113,6 +138,8 @@ def test_github_actions_rpm_workflow_builds_and_publishes():
 def test_readme_mentions_local_install_logs_and_diagnostics():
     text = _read("README.md")
 
+    assert "sudo dnf install ./dist/rpm/vpnpilot-*.rpm" in text
+    assert "./scripts/install-rpm.sh" in text
     assert "scripts/install-local.sh" in text
     assert "scripts/uninstall-local.sh" in text
     assert "~/.local/state/vpnpilot/vpnpilot.log" in text

@@ -6,9 +6,15 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 dist/
+!dist/
+dist/*
+!dist/rpm/
+!dist/rpm/*.rpm
+!dist/rpm/README.md
 build/
 .rpmbuild/
 *.rpm
+!dist/rpm/*.rpm
 ~/.local/state/vpnpilot/
 .idea/
 .vscode/

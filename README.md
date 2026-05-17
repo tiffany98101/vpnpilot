@@ -48,18 +48,27 @@ Do not run the official Proton VPN GUI app and the Proton VPN CLI at the same ti
 
 ## Installation
 
-### Recommended: install the RPM
+### Normal install from git clone
 
-Download the latest `vpnpilot-*.rpm` from GitHub Releases, then install it with Fedora's package manager:
+The repository includes a prebuilt VPNPilot RPM under `dist/rpm/`, so normal users do not need to build the RPM, install RPM build tools, use pip, or run from source.
 
 ```sh
-sudo dnf install ./vpnpilot-*.rpm
+git clone https://github.com/tiffany98101/vpnpilot.git
+cd vpnpilot
+sudo dnf install ./dist/rpm/vpnpilot-*.rpm
 ```
 
-RPM installs should pull in Proton VPN's official Linux CLI dependency automatically when Proton's Fedora repository is enabled. If dnf cannot resolve `proton-vpn-cli`, install Proton VPN CLI first using Proton's Fedora instructions, or run:
+Or use the wrapper script:
+
+```sh
+./scripts/install-rpm.sh
+```
+
+The VPNPilot RPM declares Proton VPN's official Linux CLI package, `proton-vpn-cli`, as a runtime dependency. If `dnf` cannot find `proton-vpn-cli`, install Proton's Fedora repository and CLI first, then retry the VPNPilot install:
 
 ```sh
 ./scripts/install-protonvpn-cli-fedora.sh
+sudo dnf install ./dist/rpm/vpnpilot-*.rpm
 ```
 
 Then sign in with your own Proton VPN account:
@@ -70,13 +79,11 @@ protonvpn signin you@example.com
 
 Do not copy someone else's Proton VPN credentials, tokens, profiles, or local configuration.
 
-To uninstall VPNPilot:
-
-```sh
-sudo dnf remove vpnpilot
-```
+GitHub Releases also provide RPM/SRPM files for tagged builds.
 
 ### Build the RPM locally from source
+
+This path is for maintainers and developers only:
 
 ```sh
 git clone https://github.com/tiffany98101/vpnpilot.git
@@ -86,6 +93,12 @@ sudo dnf install ~/rpmbuild/RPMS/noarch/vpnpilot-*.rpm
 ```
 
 The package is currently `noarch`; if that changes later, install from the matching architecture directory under `~/rpmbuild/RPMS/`.
+
+To uninstall VPNPilot:
+
+```sh
+sudo dnf remove vpnpilot
+```
 
 ### Developer install
 
