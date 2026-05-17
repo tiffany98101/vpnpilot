@@ -68,6 +68,7 @@ class Controller(QObject):
         self._poll_task: asyncio.Task | None = None
         self._refresh_task: asyncio.Task | None = None
         self._last_refresh_started_at: float | None = None
+        self._last_error: str | None = None
         self._stopping = asyncio.Event()
 
     @property
@@ -77,6 +78,10 @@ class Controller(QObject):
     @property
     def poll_interval_key(self) -> str:
         return self._poll_interval_key
+
+    @property
+    def last_error(self) -> str | None:
+        return self._last_error
 
     def start(self) -> None:
         if self._poll_task is None:
@@ -100,14 +105,14 @@ class Controller(QObject):
         # session, and we want it available as a recovery path if our
         # detection is somehow wrong.
         if self._current.auth is AuthState.SIGNED_OUT:
-            self.error_occurred.emit("Sign in to ProtonVPN first.")
+            self._emit_error("Sign in to ProtonVPN first.")
             return
         if self._preset_store is None:
-            self.error_occurred.emit("No presets configured.")
+            self._emit_error("No presets configured.")
             return
         preset = self._preset_store.get(preset_id)
         if preset is None:
-            self.error_occurred.emit("Preset not found.")
+            self._emit_error("Preset not found.")
             return
         self._spawn(self._do_connect(**preset_to_connect_kwargs(preset)))
 
@@ -118,7 +123,7 @@ class Controller(QObject):
         Gated on auth state — no-ops with error signal when signed out.
         """
         if self._current.auth is AuthState.SIGNED_OUT:
-            self.error_occurred.emit("Sign in to ProtonVPN first.")
+            self._emit_error("Sign in to ProtonVPN first.")
             return
         if city:
             self._spawn(self._do_connect(city=city))
@@ -134,7 +139,7 @@ class Controller(QObject):
         Gated on auth state — no-ops with error signal when signed out.
         """
         if self._current.auth is AuthState.SIGNED_OUT:
-            self.error_occurred.emit("Sign in to ProtonVPN first.")
+            self._emit_error("Sign in to ProtonVPN first.")
             return
         normalized = server_id.strip().upper()
         if not _SERVER_ID_RE.match(normalized):
@@ -193,18 +198,22 @@ class Controller(QObject):
         self._in_flight = asyncio.create_task(coro)
 
     async def _do_connect(self, **kwargs) -> None:
+        log.info("connect requested: %s", _summarize_connect_kwargs(kwargs))
         self._set(ConnectionInfo(state=ConnState.TRANSITIONING))
         result = await self._cli.connect(**kwargs)
         if not result.ok:
-            self.error_occurred.emit(_short_err(result))
+            log.warning("connect failed: rc=%s stderr=%r", result.returncode, result.stderr)
+            self._emit_error(_short_err(result))
         # Force an immediate detection pass so we don't wait for the next poll tick.
         await self._refresh_state(force=True)
 
     async def _do_disconnect(self) -> None:
+        log.info("disconnect requested")
         self._set(ConnectionInfo(state=ConnState.TRANSITIONING))
         result = await self._cli.disconnect()
         if not result.ok:
-            self.error_occurred.emit(_short_err(result))
+            log.warning("disconnect failed: rc=%s stderr=%r", result.returncode, result.stderr)
+            self._emit_error(_short_err(result))
         await self._refresh_state(force=True)
 
     async def _poll_loop(self, *, initial_poll: bool) -> None:
@@ -240,9 +249,7 @@ class Controller(QObject):
             log.debug("refresh skipped: cooldown active")
             return
         self._last_refresh_started_at = now
-        self._refresh_task = asyncio.create_task(
-            self._run_refresh_state(), name="vpnpilot-refresh"
-        )
+        self._refresh_task = asyncio.create_task(self._run_refresh_state(), name="vpnpilot-refresh")
         try:
             await asyncio.shield(self._refresh_task)
         finally:
@@ -250,11 +257,18 @@ class Controller(QObject):
                 self._refresh_task = None
 
     async def _run_refresh_state(self) -> None:
+        log.debug("refreshing status")
         try:
             info = await self._detector.detect()
         except Exception:  # noqa: BLE001
             log.exception("detector raised; treating as disconnected")
-            info = ConnectionInfo(state=ConnState.DISCONNECTED, error="detector error")
+            self._last_error = "detector error"
+            info = ConnectionInfo(state=ConnState.UNKNOWN, error="detector error")
+        if info.error:
+            self._last_error = info.error
+            log.info("status refresh result: %s error=%s", info.state.value, info.error)
+        else:
+            log.info("status refresh result: %s", info.state.value)
         self._set(info)
 
     def _set(self, info: ConnectionInfo) -> None:
@@ -266,6 +280,10 @@ class Controller(QObject):
         self._persistence.note_email(info.account_email)
         self.state_changed.emit(info)
 
+    def _emit_error(self, message: str) -> None:
+        self._last_error = message
+        self.error_occurred.emit(message)
+
 
 def _short_err(result) -> str:
     blob = (result.stderr or result.stdout or "").strip()
@@ -273,3 +291,14 @@ def _short_err(result) -> str:
         return f"protonvpn exited {result.returncode}"
     # Pick the first non-empty line; CLI errors are typically one line anyway.
     return blob.splitlines()[0][:200]
+
+
+def _summarize_connect_kwargs(kwargs: dict) -> str:
+    parts = []
+    for key in ("country", "city", "server_id"):
+        if kwargs.get(key):
+            parts.append(f"{key}={kwargs[key]}")
+    for key in ("p2p", "secure_core", "tor", "random_server"):
+        if kwargs.get(key):
+            parts.append(key)
+    return ", ".join(parts) or "fastest"

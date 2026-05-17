@@ -18,16 +18,9 @@ import tempfile
 from pathlib import Path
 from typing import Protocol
 
+from .paths import default_state_path
+
 log = logging.getLogger(__name__)
-
-
-def _xdg_config_home() -> Path:
-    raw = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    return Path(raw)
-
-
-def default_state_path() -> Path:
-    return _xdg_config_home() / "vpnpilot" / "state.json"
 
 
 class Persistence(Protocol):

@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from importlib.resources import files
 
-from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QAction, QActionGroup, QIcon
+from PyQt6.QtCore import QTimer, QUrl
+from PyQt6.QtGui import QAction, QActionGroup, QDesktopServices, QIcon
 from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import APP_NAME, __version__
 from .catalog import ServerCatalog
-from .controller import Controller, POLL_INTERVAL_CHOICES
+from .controller import POLL_INTERVAL_CHOICES, Controller
 from .detect import detect_official_proton_gui_processes
+from .diagnostics import collect_diagnostics
 from .main_window import MainWindow
+from .paths import default_log_path
 from .preset import PresetStore
 from .signin_panel import SignInPanel
 from .state import AuthState, ConnectionInfo, ConnState
@@ -47,9 +50,7 @@ class TrayApp:
         self._preset_store = preset_store
         self._persistence = persistence or NullPersistence()
         self._catalog = catalog
-        self._official_gui_detector = (
-            official_gui_detector or detect_official_proton_gui_processes
-        )
+        self._official_gui_detector = official_gui_detector or detect_official_proton_gui_processes
         self._last_gui_conflict_pids: set[int] = set()
         self._tray = QSystemTrayIcon()
         self._tray.setToolTip(f"{APP_NAME} {__version__}")
@@ -58,6 +59,7 @@ class TrayApp:
         self._gui_conflict_timer = QTimer(self._tray)
         self._gui_conflict_timer.setInterval(_GUI_CONFLICT_POLL_MS)
         self._gui_conflict_timer.timeout.connect(self._check_official_gui_conflict)
+        self._diagnostics_task: asyncio.Task | None = None
         self._build_menu()
         self._connect_signals()
         self._render(controller.current)
@@ -115,15 +117,23 @@ class TrayApp:
             action = QAction(labels[key], self._refresh_interval_menu)
             action.setCheckable(True)
             action.triggered.connect(
-                lambda checked=False, selected=key: (
-                    self._controller.set_poll_interval_key(selected)
-                )
+                lambda checked=False, selected=key: self._controller.set_poll_interval_key(selected)
             )
             self._refresh_interval_menu.addAction(action)
             self._refresh_interval_group.addAction(action)
             self._refresh_interval_actions[key] = action
         self._menu.addMenu(self._refresh_interval_menu)
         self._sync_refresh_interval_menu()
+
+        self._menu.addSeparator()
+
+        self._copy_diagnostics_action = QAction("Copy Diagnostic Info")
+        self._copy_diagnostics_action.triggered.connect(self._copy_diagnostic_info)
+        self._menu.addAction(self._copy_diagnostics_action)
+
+        self._open_log_action = QAction("Open Log")
+        self._open_log_action.triggered.connect(self._open_log)
+        self._menu.addAction(self._open_log_action)
 
         self._menu.addSeparator()
 
@@ -247,6 +257,39 @@ class TrayApp:
         log.warning("controller error: %s", msg)
         self._show_warning(msg, duration_ms=5000)
 
+    def _copy_diagnostic_info(self) -> None:
+        if self._diagnostics_task is not None and not self._diagnostics_task.done():
+            return
+        self._copy_diagnostics_action.setEnabled(False)
+        self._diagnostics_task = asyncio.create_task(self._collect_and_copy_diagnostics())
+
+    async def _collect_and_copy_diagnostics(self) -> None:
+        log.info("diagnostic collection requested")
+        try:
+            text = await collect_diagnostics(last_error=self._controller.last_error)
+            self._app.clipboard().setText(text)
+        except Exception as e:  # noqa: BLE001
+            log.exception("could not copy diagnostic info")
+            self._show_warning(f"Could not copy diagnostic info: {e}", duration_ms=5000)
+        else:
+            self._show_info("Diagnostic info copied to clipboard.", duration_ms=3000)
+        finally:
+            self._copy_diagnostics_action.setEnabled(True)
+
+    def _open_log(self) -> None:
+        log_path = default_log_path()
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.touch(exist_ok=True)
+            opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_path)))
+        except OSError as e:
+            log.exception("could not open log")
+            self._show_warning(f"Could not open log: {e}", duration_ms=5000)
+            return
+        if not opened:
+            log.warning("desktop service refused to open log: %s", log_path)
+            self._show_warning(f"Log file: {log_path}", duration_ms=7000)
+
     def _check_official_gui_conflict(self) -> None:
         """Show a warning when the official Proton GUI is likely running."""
         try:
@@ -274,8 +317,11 @@ class TrayApp:
         self._show_warning(msg, duration_ms=9000)
 
     def _show_warning(self, message: str, *, duration_ms: int) -> None:
+        self._tray.showMessage(APP_NAME, message, QSystemTrayIcon.MessageIcon.Warning, duration_ms)
+
+    def _show_info(self, message: str, *, duration_ms: int) -> None:
         self._tray.showMessage(
-            APP_NAME, message, QSystemTrayIcon.MessageIcon.Warning, duration_ms
+            APP_NAME, message, QSystemTrayIcon.MessageIcon.Information, duration_ms
         )
 
     # ----- signed-in panel -----
@@ -335,6 +381,30 @@ class TrayApp:
                 self._server_action.setVisible(False)
                 self._disconnect_action.setEnabled(False)
                 self._tray.setToolTip("vpnpilot — working…")
+            case ConnState.CLI_MISSING:
+                self._tray.setIcon(_icon("icon-disconnected.svg"))
+                self._status_action.setText("Status: ProtonVPN CLI not found")
+                self._server_action.setVisible(False)
+                self._disconnect_action.setEnabled(False)
+                self._tray.setToolTip("vpnpilot — ProtonVPN CLI not found")
+            case ConnState.CLI_ERROR:
+                self._tray.setIcon(_icon("icon-disconnected.svg"))
+                self._status_action.setText("Status: ProtonVPN CLI error")
+                self._server_action.setVisible(False)
+                self._disconnect_action.setEnabled(False)
+                self._tray.setToolTip("vpnpilot — ProtonVPN CLI error")
+            case ConnState.NETWORK_OFFLINE:
+                self._tray.setIcon(_icon("icon-disconnected.svg"))
+                self._status_action.setText("Status: network offline")
+                self._server_action.setVisible(False)
+                self._disconnect_action.setEnabled(False)
+                self._tray.setToolTip("vpnpilot — network offline")
+            case ConnState.UNKNOWN:
+                self._tray.setIcon(_icon("icon-disconnected.svg"))
+                self._status_action.setText("Status: unknown")
+                self._server_action.setVisible(False)
+                self._disconnect_action.setEnabled(False)
+                self._tray.setToolTip("vpnpilot — status unknown")
             case _:
                 self._tray.setIcon(_icon("icon-disconnected.svg"))
                 self._status_action.setText("Status: disconnected")

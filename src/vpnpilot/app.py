@@ -20,6 +20,7 @@ from .catalog import ServerCatalog
 from .cli import ProtonCLI
 from .controller import Controller
 from .detect import default_detector
+from .logging_setup import configure_logging
 from .preset import PresetStore
 from .tray import TrayApp, ensure_tray_available
 from .user_state import JsonStateStore
@@ -50,21 +51,15 @@ def _show_cli_missing(parent_app: QApplication) -> int:
 
 
 def _notify_already_running(pid: int | None) -> None:
-    msg = (
-        f"vpnpilot is already running (pid {pid})."
-        if pid
-        else "vpnpilot is already running."
-    )
+    msg = f"vpnpilot is already running (pid {pid})." if pid else "vpnpilot is already running."
     print(msg, file=sys.stderr)
     if shutil.which("notify-send"):
         subprocess.run(["notify-send", APP_NAME, msg], check=False)
 
 
 def main() -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging()
+    log.info("app startup")
 
     # Held for the life of this process — if released too early a second
     # launch could slip in. The local binding keeps the file descriptor
@@ -85,7 +80,7 @@ def main() -> int:
         return 0
 
     if not ProtonCLI.is_installed():
-        return _show_cli_missing(app)
+        log.warning("Proton VPN CLI missing at startup; launching degraded tray")
 
     loop = QEventLoop(app)
     asyncio.set_event_loop(loop)
@@ -95,9 +90,7 @@ def main() -> int:
     store = JsonStateStore()
     preset_store = PresetStore()
     preset_store.load()
-    controller = Controller(
-        cli, detector, persistence=store, preset_store=preset_store
-    )
+    controller = Controller(cli, detector, persistence=store, preset_store=preset_store)
     catalog = ServerCatalog(cli)
 
     tray = TrayApp(app, controller, preset_store=preset_store, persistence=store, catalog=catalog)

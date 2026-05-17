@@ -21,13 +21,11 @@ Protocol: wireguard
 STATUS_DISCONNECTED = "Status: Disconnected\n"
 
 STATUS_WITH_REFRESH_PREAMBLE = (
-    "Server list is outdated, updating... This may take a moment.\n"
-    + STATUS_CONNECTED
+    "Server list is outdated, updating... This may take a moment.\n" + STATUS_CONNECTED
 )
 
 CONNECT_SUCCESS = (
-    "Connected to US-WA#347 in Seattle, United States. \n"
-    "Your new IP address is 159.26.103.107.\n"
+    "Connected to US-WA#347 in Seattle, United States. \nYour new IP address is 159.26.103.107.\n"
 )
 
 
@@ -45,6 +43,16 @@ def test_parse_status_disconnected():
     info = parse_status(STATUS_DISCONNECTED)
     assert info.state is ConnState.DISCONNECTED
     assert info.server is None
+
+
+def test_parse_status_connecting_is_transitioning():
+    info = parse_status("Status: Connecting\n")
+    assert info.state is ConnState.TRANSITIONING
+
+
+def test_parse_status_disconnecting_is_transitioning():
+    info = parse_status("Status: Disconnecting\n")
+    assert info.state is ConnState.TRANSITIONING
 
 
 def test_parse_status_with_refresh_preamble():

@@ -30,6 +30,8 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 
+from .paths import default_presets_path
+
 log = logging.getLogger(__name__)
 
 
@@ -179,18 +181,6 @@ def preset_from_dict(d: dict) -> Preset:
     )
 
 
-# ---- path helpers -----------------------------------------------------
-
-
-def _xdg_config_home() -> Path:
-    raw = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    return Path(raw)
-
-
-def default_presets_path() -> Path:
-    return _xdg_config_home() / "vpnpilot" / "presets.json"
-
-
 # ---- store ------------------------------------------------------------
 
 
@@ -285,9 +275,7 @@ class PresetStore:
         idx, target = self._index_of(preset_id)
         if target.is_default:
             return target
-        self._presets = [
-            replace(p, is_default=(i == idx)) for i, p in enumerate(self._presets)
-        ]
+        self._presets = [replace(p, is_default=(i == idx)) for i, p in enumerate(self._presets)]
         new_default = self._presets.pop(idx)
         self._presets.insert(0, new_default)
         self._save()
@@ -316,7 +304,7 @@ class PresetStore:
         try:
             raw = self._path.read_text(encoding="utf-8")
         except FileNotFoundError:
-            log.info("presets.json absent; seeding with default preset")
+            log.debug("presets.json absent; seeding with default preset")
             seeded = [_seed_preset()]
             self._presets = seeded
             self._save_now(seeded)
@@ -326,7 +314,7 @@ class PresetStore:
             return [_seed_preset()]
 
         if not raw.strip():
-            log.info("presets.json is empty; reseeding")
+            log.debug("presets.json is empty; reseeding")
             seeded = [_seed_preset()]
             self._presets = seeded
             self._save_now(seeded)
@@ -337,9 +325,7 @@ class PresetStore:
             presets_d = doc.get("presets", [])
             parsed = [preset_from_dict(d) for d in presets_d]
         except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
-            log.warning(
-                "presets.json is malformed (%s); backing up to .corrupt and reseeding", e
-            )
+            log.warning("presets.json is malformed (%s); backing up to .corrupt and reseeding", e)
             self._backup_corrupt()
             seeded = [_seed_preset()]
             self._presets = seeded
@@ -374,8 +360,7 @@ class PresetStore:
         else:
             new_default_idx = flagged[0] if flagged else 0
             self._presets = [
-                replace(p, is_default=(i == new_default_idx))
-                for i, p in enumerate(self._presets)
+                replace(p, is_default=(i == new_default_idx)) for i, p in enumerate(self._presets)
             ]
             needs_rewrite = True
         # Move default to index 0 if not already there.

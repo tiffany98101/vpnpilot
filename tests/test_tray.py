@@ -29,6 +29,7 @@ class FakeController(QObject):
         self.disconnect = MagicMock()
         self.force_refresh = MagicMock()
         self.poll_interval_key = "10m"
+        self.last_error = None
         self.set_poll_interval_key = MagicMock(
             side_effect=lambda key: setattr(self, "poll_interval_key", key)
         )
@@ -51,9 +52,7 @@ def _connect_action_texts(tray: TrayApp) -> list[str]:
     return [a.text() for a in tray._dynamic_actions]
 
 
-def test_initial_menu_has_default_connect_only_with_one_preset(
-    qapp_instance, store
-):
+def test_initial_menu_has_default_connect_only_with_one_preset(qapp_instance, store):
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
     assert _connect_action_texts(tray) == ["Connect to Seattle"]
@@ -81,15 +80,11 @@ def test_clicking_default_connect_routes_to_controller(qapp_instance, store):
 
 
 def test_clicking_submenu_item_routes_to_controller(qapp_instance, store):
-    nyc = store.add(
-        name="NYC", target=PresetTarget(kind=TargetKind.CITY, value="New York")
-    )
+    nyc = store.add(name="NYC", target=PresetTarget(kind=TargetKind.CITY, value="New York"))
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
     assert tray._connect_submenu is not None
-    nyc_action = next(
-        a for a in tray._connect_submenu.actions() if a.text() == "NYC"
-    )
+    nyc_action = next(a for a in tray._connect_submenu.actions() if a.text() == "NYC")
     nyc_action.trigger()
     ctrl.connect_preset.assert_called_once_with(nyc.id)
 
@@ -106,9 +101,7 @@ def test_rebuild_after_preset_added(qapp_instance, store):
 
 
 def test_rebuild_after_set_default_swaps_top_entry(qapp_instance, store):
-    nyc = store.add(
-        name="NYC", target=PresetTarget(kind=TargetKind.CITY, value="New York")
-    )
+    nyc = store.add(name="NYC", target=PresetTarget(kind=TargetKind.CITY, value="New York"))
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
     assert _connect_action_texts(tray)[0] == "Connect to Seattle"
@@ -120,21 +113,15 @@ def test_rebuild_after_set_default_swaps_top_entry(qapp_instance, store):
 def test_dynamic_actions_disabled_when_signed_out(qapp_instance, store):
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
-    ctrl.state_changed.emit(
-        ConnectionInfo(state=ConnState.DISCONNECTED, auth=AuthState.SIGNED_OUT)
-    )
+    ctrl.state_changed.emit(ConnectionInfo(state=ConnState.DISCONNECTED, auth=AuthState.SIGNED_OUT))
     for a in tray._dynamic_actions:
         assert a.isEnabled() is False
 
 
-def test_disconnect_stays_enabled_when_connected_even_if_signed_out(
-    qapp_instance, store
-):
+def test_disconnect_stays_enabled_when_connected_even_if_signed_out(qapp_instance, store):
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
-    ctrl.state_changed.emit(
-        ConnectionInfo(state=ConnState.CONNECTED, auth=AuthState.SIGNED_OUT)
-    )
+    ctrl.state_changed.emit(ConnectionInfo(state=ConnState.CONNECTED, auth=AuthState.SIGNED_OUT))
     assert tray._disconnect_action.isEnabled() is True
 
 
@@ -155,9 +142,7 @@ def test_dynamic_actions_disabled_when_connected(qapp_instance, store):
 def test_dynamic_actions_enabled_when_disconnected(qapp_instance, store):
     ctrl = FakeController()
     tray = TrayApp(qapp_instance, ctrl, preset_store=store)
-    ctrl.state_changed.emit(
-        ConnectionInfo(state=ConnState.DISCONNECTED, auth=AuthState.SIGNED_IN)
-    )
+    ctrl.state_changed.emit(ConnectionInfo(state=ConnState.DISCONNECTED, auth=AuthState.SIGNED_IN))
     for a in tray._dynamic_actions:
         assert a.isEnabled() is True
 
@@ -173,6 +158,8 @@ def test_menu_structure_has_expected_top_level_items(qapp_instance, store):
     assert any("Open VPNPilot" in t for t in texts)
     assert "Refresh now" in texts
     assert "Refresh interval" in texts
+    assert "Copy Diagnostic Info" in texts
+    assert "Open Log" in texts
     assert "Connect to Seattle" in texts
     assert "Disconnect" in texts
     assert "Quit" in texts

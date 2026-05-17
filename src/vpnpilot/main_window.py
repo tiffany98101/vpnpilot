@@ -49,6 +49,10 @@ _STATE_TEXT = {
     ConnState.CONNECTED: "Connected",
     ConnState.DISCONNECTED: "Disconnected",
     ConnState.TRANSITIONING: "Working…",
+    ConnState.CLI_MISSING: "CLI not found",
+    ConnState.CLI_ERROR: "CLI error",
+    ConnState.NETWORK_OFFLINE: "Network offline",
+    ConnState.UNKNOWN: "Unknown",
 }
 
 # Color values match the tray icon palette closely enough; full
@@ -57,6 +61,10 @@ _STATE_STYLE = {
     ConnState.CONNECTED: "color: #1f8a36; font-size: 18pt; font-weight: 600;",
     ConnState.DISCONNECTED: "color: #888; font-size: 18pt; font-weight: 600;",
     ConnState.TRANSITIONING: "color: #c98a00; font-size: 18pt; font-weight: 600;",
+    ConnState.CLI_MISSING: "color: #a33; font-size: 18pt; font-weight: 600;",
+    ConnState.CLI_ERROR: "color: #a33; font-size: 18pt; font-weight: 600;",
+    ConnState.NETWORK_OFFLINE: "color: #888; font-size: 18pt; font-weight: 600;",
+    ConnState.UNKNOWN: "color: #888; font-size: 18pt; font-weight: 600;",
 }
 
 
@@ -106,9 +114,7 @@ class StatusPanel(QFrame):
         if info.state is ConnState.CONNECTED and info.server:
             bits = [b for b in (info.city, info.country) if b]
             where = ", ".join(bits)
-            self.server_label.setText(
-                f"{info.server} — {where}" if where else info.server
-            )
+            self.server_label.setText(f"{info.server} — {where}" if where else info.server)
             self.server_label.setVisible(True)
         else:
             self.server_label.setVisible(False)
@@ -325,18 +331,12 @@ class PresetListPanel(QFrame):
         preset = self._selected_preset()
         has_selection = preset is not None
         signed_out = self._current_info.auth is AuthState.SIGNED_OUT
-        already_at_target = bool(
-            preset and preset_matches_connection(preset, self._current_info)
-        )
+        already_at_target = bool(preset and preset_matches_connection(preset, self._current_info))
 
-        self.connect_btn.setEnabled(
-            has_selection and not signed_out and not already_at_target
-        )
+        self.connect_btn.setEnabled(has_selection and not signed_out and not already_at_target)
         self.edit_btn.setEnabled(has_selection)
         self.delete_btn.setEnabled(has_selection and not (preset and preset.is_default))
-        self.set_default_btn.setEnabled(
-            has_selection and not (preset and preset.is_default)
-        )
+        self.set_default_btn.setEnabled(has_selection and not (preset and preset.is_default))
         # new_btn always enabled.
 
     def _on_double_click(self, index: QModelIndex) -> None:
@@ -404,9 +404,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_NAME)
         self.resize(700, 500)
         try:
-            self.setWindowIcon(
-                QIcon(str(files("vpnpilot.resources").joinpath("icon-app.svg")))
-            )
+            self.setWindowIcon(QIcon(str(files("vpnpilot.resources").joinpath("icon-app.svg"))))
         except Exception:  # noqa: BLE001
             log.debug("could not load app icon for main window", exc_info=True)
 
@@ -494,9 +492,7 @@ class MainWindow(QMainWindow):
 
     def _on_preset_new(self) -> None:
         taken = {p.name for p in self._preset_store.list_all()}
-        dlg = PresetEditorDialog(
-            preset=None, taken_names=taken, catalog=self._catalog, parent=self
-        )
+        dlg = PresetEditorDialog(preset=None, taken_names=taken, catalog=self._catalog, parent=self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         name, target, flags = dlg.values()

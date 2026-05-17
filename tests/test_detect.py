@@ -12,9 +12,10 @@ from vpnpilot.detect import (
     CLIStatusDetector,
     CompositeDetector,
     InterfaceDetector,
+    NetworkStatusDetector,
     detect_official_proton_gui_processes,
 )
-from vpnpilot.state import AuthState, ConnState
+from vpnpilot.state import AuthState, ConnectionInfo, ConnState
 
 
 def make_fake_sysfs(tmp_path: Path, interfaces: dict[str, int]) -> Path:
@@ -87,15 +88,21 @@ class FakeCLI(ProtonCLI):
         status_ok: bool = True,
         info_stdout: str = "Account: 'tiffany.vonarnim@gmail.com'\n",
         info_ok: bool = True,
+        status_returncode: int | None = None,
     ):
         self._status_stdout = status_stdout
         self._status_ok = status_ok
+        self._status_returncode = status_returncode
         self._info_stdout = info_stdout
         self._info_ok = info_ok
 
     async def status(self):  # type: ignore[override]
         return CLIResult(
-            returncode=0 if self._status_ok else 1,
+            returncode=self._status_returncode
+            if self._status_returncode is not None
+            else 0
+            if self._status_ok
+            else 1,
             stdout=self._status_stdout,
             stderr="" if self._status_ok else "boom",
         )
@@ -108,6 +115,14 @@ class FakeCLI(ProtonCLI):
         )
 
 
+class StaticDetector:
+    def __init__(self, info: ConnectionInfo):
+        self.info = info
+
+    async def detect(self):
+        return self.info
+
+
 def make_composite(sysfs_path, *, cli=None):
     """Helper: assemble a CompositeDetector with the given parts."""
     cli = cli or FakeCLI()
@@ -115,16 +130,35 @@ def make_composite(sysfs_path, *, cli=None):
         InterfaceDetector(sysfs=str(sysfs_path)),
         CLIStatusDetector(cli),
         AuthDetector(cli),
+        StaticDetector(ConnectionInfo(state=ConnState.DISCONNECTED)),
     )
 
 
 @pytest.mark.asyncio
 async def test_cli_status_detector_parses_connected():
-    cli = FakeCLI(status_stdout="Status: Connected\nServer: US-WA#1 in Seattle, United States\nLoad: 10%\nProtocol: wireguard\n")
+    cli = FakeCLI(
+        status_stdout="Status: Connected\nServer: US-WA#1 in Seattle, United States\nLoad: 10%\nProtocol: wireguard\n"
+    )
     det = CLIStatusDetector(cli)
     info = await det.detect()
     assert info.state is ConnState.CONNECTED
     assert info.server == "US-WA#1"
+
+
+@pytest.mark.asyncio
+async def test_cli_status_detector_reports_missing_cli():
+    cli = FakeCLI(status_ok=False, status_returncode=127)
+    det = CLIStatusDetector(cli)
+    info = await det.detect()
+    assert info.state is ConnState.CLI_MISSING
+
+
+@pytest.mark.asyncio
+async def test_cli_status_detector_reports_cli_error():
+    cli = FakeCLI(status_ok=False)
+    det = CLIStatusDetector(cli)
+    info = await det.detect()
+    assert info.state is ConnState.CLI_ERROR
 
 
 @pytest.mark.asyncio
@@ -137,6 +171,31 @@ async def test_composite_trusts_interface_when_disconnected(tmp_path):
     composite = make_composite(sysfs, cli=cli)
     info = await composite.detect()
     assert info.state is ConnState.DISCONNECTED
+
+
+@pytest.mark.asyncio
+async def test_composite_reports_network_offline_before_cli_missing(tmp_path):
+    sysfs = make_fake_sysfs(tmp_path, {})
+    cli = FakeCLI(status_ok=False, status_returncode=127)
+    composite = CompositeDetector(
+        InterfaceDetector(sysfs=str(sysfs)),
+        CLIStatusDetector(cli),
+        AuthDetector(cli),
+        StaticDetector(ConnectionInfo(state=ConnState.NETWORK_OFFLINE)),
+    )
+    info = await composite.detect()
+    assert info.state is ConnState.NETWORK_OFFLINE
+
+
+@pytest.mark.asyncio
+async def test_network_status_detector_offline_when_no_default_route(monkeypatch):
+    async def fake_run(_argv, *, timeout):
+        return CLIResult(returncode=0, stdout="10.0.0.0/24 dev eth0\n", stderr="")
+
+    monkeypatch.setattr("vpnpilot.detect._run_command", fake_run)
+    det = NetworkStatusDetector()
+    info = await det.detect()
+    assert info.state is ConnState.NETWORK_OFFLINE
 
 
 @pytest.mark.asyncio
@@ -167,6 +226,7 @@ async def test_composite_stays_connected_if_cli_fails_but_iface_up(tmp_path):
 
 
 # ---- auth axis -------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_auth_detector_signed_in_returns_email():

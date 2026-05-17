@@ -19,6 +19,7 @@ from .state import AuthState, ConnectionInfo, ConnState
 
 DEFAULT_TIMEOUT = 30.0  # seconds; status can take 10s+ on first call after a state change
 PROTONVPN_BIN = "protonvpn"
+PROTONVPN_BIN_FALLBACK = "protonvpn-cli"
 
 log = logging.getLogger(__name__)
 
@@ -39,12 +40,21 @@ class ProtonCLI:
     """Async wrapper. All public methods are coroutines."""
 
     def __init__(self, bin_path: str | None = None, timeout: float = DEFAULT_TIMEOUT) -> None:
-        self._bin = bin_path or PROTONVPN_BIN
+        self._bin = bin_path or _default_bin()
         self._timeout = timeout
 
     @staticmethod
     def is_installed(bin_path: str = PROTONVPN_BIN) -> bool:
-        return shutil.which(bin_path) is not None
+        if bin_path != PROTONVPN_BIN:
+            return shutil.which(bin_path) is not None
+        return (
+            shutil.which(PROTONVPN_BIN) is not None
+            or shutil.which(PROTONVPN_BIN_FALLBACK) is not None
+        )
+
+    @property
+    def bin_name(self) -> str:
+        return self._bin
 
     async def run_command(self, args: Sequence[str], *, timeout: float | None = None) -> CLIResult:
         """Generic entry point for running any protonvpn sub-command."""
@@ -60,6 +70,7 @@ class ProtonCLI:
                 stderr=asyncio.subprocess.PIPE,
             )
         except FileNotFoundError:
+            log.warning("protonvpn CLI not found: %s", self._bin)
             return CLIResult(returncode=127, stdout="", stderr=f"{self._bin}: not found")
         try:
             stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=t)
@@ -71,8 +82,12 @@ class ProtonCLI:
             except ProcessLookupError:
                 pass
             except TimeoutError:
-                log.warning("protonvpn command did not exit promptly after kill: %s", " ".join(args))
-            return CLIResult(returncode=-1, stdout="", stderr=f"timed out after {t}s", timed_out=True)
+                log.warning(
+                    "protonvpn command did not exit promptly after kill: %s", " ".join(args)
+                )
+            return CLIResult(
+                returncode=-1, stdout="", stderr=f"timed out after {t}s", timed_out=True
+            )
         return CLIResult(
             returncode=proc.returncode or 0,
             stdout=stdout_b.decode("utf-8", errors="replace"),
@@ -123,6 +138,14 @@ class ProtonCLI:
         return await self._run("cities", "list", country_code, timeout=10.0)
 
 
+def _default_bin() -> str:
+    if shutil.which(PROTONVPN_BIN):
+        return PROTONVPN_BIN
+    if shutil.which(PROTONVPN_BIN_FALLBACK):
+        return PROTONVPN_BIN_FALLBACK
+    return PROTONVPN_BIN
+
+
 # ---- Parsers (kept next to the format strings they target) -----------
 
 _STATUS_LINE = re.compile(r"^Status:\s*(.+?)\s*$", re.MULTILINE)
@@ -150,6 +173,8 @@ def parse_status(stdout: str) -> ConnectionInfo:
     if not m:
         return ConnectionInfo(state=ConnState.DISCONNECTED, error="unparseable status output")
     raw = m.group(1).strip().lower()
+    if raw.startswith(("connecting", "disconnecting")):
+        return ConnectionInfo(state=ConnState.TRANSITIONING)
     if raw.startswith("disconnect"):
         return ConnectionInfo(state=ConnState.DISCONNECTED)
     if not raw.startswith("connect"):
