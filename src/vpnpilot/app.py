@@ -17,7 +17,7 @@ from . import APP_NAME
 from ._qasync_shim import QEventLoop
 from ._singleton import SingletonLock
 from .catalog import ServerCatalog
-from .cli import ProtonCLI
+from .cli import ProtonCLI, missing_cli_message
 from .controller import Controller
 from .detect import default_detector
 from .logging_setup import configure_logging
@@ -38,14 +38,7 @@ def _show_cli_missing(parent_app: QApplication) -> int:
     QMessageBox.critical(
         None,
         f"{APP_NAME} — CLI not detected",
-        (
-            "The official ProtonVPN CLI was not found in your PATH.\n\n"
-            "Install it with:\n"
-            "  sudo dnf install proton-vpn-cli\n\n"
-            "Then sign in with:\n"
-            "  protonvpn signin <email>\n\n"
-            "Once installed, launch vpnpilot again."
-        ),
+        missing_cli_message() + "\n\nOnce installed, launch VPNPilot again.",
     )
     return 1
 
@@ -80,7 +73,8 @@ def main() -> int:
         return 0
 
     if not ProtonCLI.is_installed():
-        log.warning("Proton VPN CLI missing at startup; launching degraded tray")
+        log.warning("Proton VPN CLI missing at startup")
+        return _show_cli_missing(app)
 
     loop = QEventLoop(app)
     asyncio.set_event_loop(loop)

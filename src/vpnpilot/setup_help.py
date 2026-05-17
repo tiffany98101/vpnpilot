@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 from dataclasses import dataclass
 
+from .cli import PROTONVPN_BIN, PROTONVPN_RPM_PACKAGE
 from .diagnostics import redact
 from .state import AuthState, ConnectionInfo, ConnState
 
@@ -35,7 +36,7 @@ def help_for_status(
                 "Proton VPN appears to be installed, but the CLI reports that you are "
                 "not logged in."
             ),
-            actions=("Run: protonvpn-cli login", "Then refresh VPNPilot."),
+            actions=(f"Run: {PROTONVPN_BIN} signin <email>", "Then refresh VPNPilot."),
             detail=safe_error,
         )
 
@@ -50,8 +51,11 @@ def help_for_status(
     if info.state is ConnState.CLI_MISSING:
         return HelpItem(
             title="Proton VPN CLI not found",
-            message="VPNPilot could not find protonvpn-cli or protonvpn on PATH.",
-            actions=("On Fedora, install Proton VPN CLI, then restart VPNPilot.",),
+            message=f"VPNPilot could not find {PROTONVPN_BIN} on PATH.",
+            actions=(
+                f"On Fedora, install Proton VPN CLI with: sudo dnf install {PROTONVPN_RPM_PACKAGE}",
+                "Then restart VPNPilot.",
+            ),
             detail=safe_error,
         )
 

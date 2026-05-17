@@ -5,8 +5,7 @@ Summary:        Unofficial tray UI for the ProtonVPN CLI
 
 # vpnpilot is MIT. Bundled qasync is BSD-2-Clause.
 License:        MIT AND BSD-2-Clause
-# TODO: replace with canonical upstream project URL once publicly published.
-URL:            https://example.invalid/vpnpilot
+URL:            https://github.com/tiffany98101/vpnpilot
 Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch
@@ -18,12 +17,15 @@ BuildRequires:  desktop-file-utils
 # generated dynamically by %generate_buildrequires from pyproject.toml's
 # [build-system] requires.
 
-# The CLI we wrap. The whole point of the app.
+# Official Proton VPN Linux CLI. This package supplies /usr/bin/protonvpn
+# when Proton's Fedora repository is enabled.
 Requires:       proton-vpn-cli
 # Qt UI dependency (only one of vpnpilot's runtime deps that is in
 # Fedora repos; pydantic isn't used yet, qasync is bundled).
 Requires:       python3-pyqt6
-Recommends:     NetworkManager
+Requires:       iproute
+Requires:       hicolor-icon-theme
+Requires:       NetworkManager
 Recommends:     systemd-resolved
 # A working system tray is needed. On KDE Plasma it's built-in; on
 # GNOME the user installs the AppIndicator extension. We don't try

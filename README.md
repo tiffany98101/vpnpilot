@@ -38,7 +38,7 @@ Repository: https://github.com/tiffany98101/vpnpilot
 - Linux desktop with a working system tray
 - Fedora KDE Plasma tested
 - GNOME users need AppIndicator support
-- Official Proton VPN Linux CLI installed and signed in (`protonvpn` or `protonvpn-cli`)
+- Official Proton VPN Linux CLI installed and signed in (`protonvpn`)
 - NetworkManager tools (`nmcli`)
 - systemd resolver tools (`resolvectl`) for DNS diagnostics
 - Python 3.12+
@@ -46,7 +46,50 @@ Repository: https://github.com/tiffany98101/vpnpilot
 
 Do not run the official Proton VPN GUI app and the Proton VPN CLI at the same time.
 
-## Run from source
+## Installation
+
+### Recommended: install the RPM
+
+Download the latest `vpnpilot-*.rpm` from GitHub Releases, then install it with Fedora's package manager:
+
+```sh
+sudo dnf install ./vpnpilot-*.rpm
+```
+
+RPM installs should pull in Proton VPN's official Linux CLI dependency automatically when Proton's Fedora repository is enabled. If dnf cannot resolve `proton-vpn-cli`, install Proton VPN CLI first using Proton's Fedora instructions, or run:
+
+```sh
+./scripts/install-protonvpn-cli-fedora.sh
+```
+
+Then sign in with your own Proton VPN account:
+
+```sh
+protonvpn signin you@example.com
+```
+
+Do not copy someone else's Proton VPN credentials, tokens, profiles, or local configuration.
+
+To uninstall VPNPilot:
+
+```sh
+sudo dnf remove vpnpilot
+```
+
+### Build the RPM locally from source
+
+```sh
+git clone https://github.com/tiffany98101/vpnpilot.git
+cd vpnpilot
+./scripts/build-rpm.sh
+sudo dnf install ~/rpmbuild/RPMS/noarch/vpnpilot-*.rpm
+```
+
+The package is currently `noarch`; if that changes later, install from the matching architecture directory under `~/rpmbuild/RPMS/`.
+
+### Developer install
+
+Use the editable install flow only for development and testing from a checkout:
 
 ```sh
 git clone https://github.com/tiffany98101/vpnpilot.git
@@ -105,28 +148,9 @@ To remove only the files installed by the local test installer:
 scripts/uninstall-local.sh
 ```
 
-## Build and install the RPM
-
-On Fedora, install the RPM build tools first:
-
-```sh
-sudo dnf install -y git make rpm-build python3-devel pyproject-rpm-macros desktop-file-utils
-```
-
-Then build and install:
-
-```sh
-git clone https://github.com/tiffany98101/vpnpilot.git
-cd vpnpilot
-
-make rpm
-sudo dnf install ./dist/vpnpilot-*.noarch.rpm
-vpnpilot
-```
-
 ## First-time setup
 
-Install Proton VPN's official Linux CLI first and sign in there before using VPNPilot.
+Install Proton VPN's official Linux CLI first and sign in there before using VPNPilot. RPM installs declare `proton-vpn-cli` as a dependency, but your system must have access to Proton's Fedora repository for dnf to resolve it.
 
 Check that the CLI is available:
 

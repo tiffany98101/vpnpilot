@@ -19,7 +19,7 @@ from .state import AuthState, ConnectionInfo, ConnState
 
 DEFAULT_TIMEOUT = 30.0  # seconds; status can take 10s+ on first call after a state change
 PROTONVPN_BIN = "protonvpn"
-PROTONVPN_BIN_FALLBACK = "protonvpn-cli"
+PROTONVPN_RPM_PACKAGE = "proton-vpn-cli"
 
 log = logging.getLogger(__name__)
 
@@ -40,17 +40,12 @@ class ProtonCLI:
     """Async wrapper. All public methods are coroutines."""
 
     def __init__(self, bin_path: str | None = None, timeout: float = DEFAULT_TIMEOUT) -> None:
-        self._bin = bin_path or _default_bin()
+        self._bin = bin_path or PROTONVPN_BIN
         self._timeout = timeout
 
     @staticmethod
     def is_installed(bin_path: str = PROTONVPN_BIN) -> bool:
-        if bin_path != PROTONVPN_BIN:
-            return shutil.which(bin_path) is not None
-        return (
-            shutil.which(PROTONVPN_BIN) is not None
-            or shutil.which(PROTONVPN_BIN_FALLBACK) is not None
-        )
+        return find_protonvpn_cli(bin_path) is not None
 
     @property
     def bin_name(self) -> str:
@@ -138,12 +133,21 @@ class ProtonCLI:
         return await self._run("cities", "list", country_code, timeout=10.0)
 
 
-def _default_bin() -> str:
-    if shutil.which(PROTONVPN_BIN):
-        return PROTONVPN_BIN
-    if shutil.which(PROTONVPN_BIN_FALLBACK):
-        return PROTONVPN_BIN_FALLBACK
-    return PROTONVPN_BIN
+def find_protonvpn_cli(bin_name: str = PROTONVPN_BIN) -> str | None:
+    """Return the official Proton VPN CLI command path if available."""
+    return shutil.which(bin_name)
+
+
+def missing_cli_message() -> str:
+    return (
+        "VPNPilot requires the official Proton VPN Linux CLI command "
+        f"`{PROTONVPN_BIN}`.\n\n"
+        "On Fedora, install Proton's repository and then run:\n"
+        f"  sudo dnf install {PROTONVPN_RPM_PACKAGE}\n\n"
+        "After installation, sign in from a terminal with:\n"
+        f"  {PROTONVPN_BIN} signin <email>\n\n"
+        "VPNPilot does not ask for or handle Proton VPN credentials."
+    )
 
 
 # ---- Parsers (kept next to the format strings they target) -----------

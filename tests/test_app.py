@@ -31,6 +31,32 @@ def test_main_exits_success_when_tray_unavailable(monkeypatch):
     assert app_mod.main() == 0
 
 
+def test_main_shows_clear_error_when_proton_cli_missing(monkeypatch):
+    messages = []
+
+    class MissingProtonCLI:
+        @staticmethod
+        def is_installed():
+            return False
+
+    monkeypatch.setattr(app_mod, "SingletonLock", lambda: MagicMock(acquire=lambda: True))
+    monkeypatch.setattr(app_mod, "QApplication", FakeApplication)
+    monkeypatch.setattr(app_mod, "_app_icon", lambda: object())
+    monkeypatch.setattr(app_mod, "ensure_tray_available", lambda _app: True)
+    monkeypatch.setattr(app_mod, "ProtonCLI", MissingProtonCLI)
+    monkeypatch.setattr(
+        app_mod.QMessageBox,
+        "critical",
+        lambda _parent, title, message: messages.append((title, message)),
+    )
+
+    assert app_mod.main() == 1
+    assert len(messages) == 1
+    assert "CLI not detected" in messages[0][0]
+    assert "Proton VPN Linux CLI" in messages[0][1]
+    assert "protonvpn" in messages[0][1]
+
+
 class FakeLoop:
     def __init__(self, _app):
         self.delayed_calls = []

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from vpnpilot.cli import CLIResult, ProtonCLI
+from vpnpilot.cli import PROTONVPN_BIN, CLIResult, ProtonCLI, missing_cli_message
 
 
 class FakeProc:
@@ -94,6 +94,28 @@ def test_cliresult_ok():
     assert CLIResult(0, "", "").ok is True
     assert CLIResult(1, "", "boom").ok is False
     assert CLIResult(0, "", "", timed_out=True).ok is False
+
+
+def test_cli_detection_uses_official_protonvpn_command(monkeypatch):
+    calls = []
+
+    def fake_which(name):
+        calls.append(name)
+        return "/usr/bin/protonvpn" if name == PROTONVPN_BIN else None
+
+    monkeypatch.setattr("vpnpilot.cli.shutil.which", fake_which)
+
+    assert ProtonCLI.is_installed() is True
+    assert calls == [PROTONVPN_BIN]
+
+
+def test_missing_cli_message_is_user_facing():
+    message = missing_cli_message()
+
+    assert "Proton VPN Linux CLI" in message
+    assert "protonvpn" in message
+    assert "proton-vpn-cli" in message
+    assert "credentials" in message
 
 
 @pytest.mark.asyncio

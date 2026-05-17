@@ -14,7 +14,7 @@ def _help(info: ConnectionInfo, *, last_error: str | None = None):
 
 
 def test_help_for_cli_missing():
-    item = _help(ConnectionInfo(state=ConnState.CLI_MISSING, error="protonvpn-cli: not found"))
+    item = _help(ConnectionInfo(state=ConnState.CLI_MISSING, error="protonvpn: not found"))
 
     assert item.title == "Proton VPN CLI not found"
     assert "install Proton VPN CLI" in " ".join(item.actions)
@@ -24,7 +24,7 @@ def test_help_for_login_required_from_auth_state():
     item = _help(ConnectionInfo(state=ConnState.DISCONNECTED, auth=AuthState.SIGNED_OUT))
 
     assert item.title == "Proton VPN login required"
-    assert "protonvpn-cli login" in " ".join(item.actions)
+    assert "protonvpn signin <email>" in " ".join(item.actions)
 
 
 def test_help_for_login_required_from_error_text():

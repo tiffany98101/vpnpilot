@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import __version__
-from .cli import PROTONVPN_BIN, PROTONVPN_BIN_FALLBACK, CLIResult
+from .cli import PROTONVPN_BIN, CLIResult
 from .paths import default_log_path
 
 log = logging.getLogger(__name__)
@@ -137,18 +137,14 @@ def _command_specs() -> list[CommandSpec]:
 
 
 def _first_cli_bin() -> str | None:
-    for candidate in (PROTONVPN_BIN, PROTONVPN_BIN_FALLBACK):
-        if shutil.which(candidate):
-            return candidate
+    if shutil.which(PROTONVPN_BIN):
+        return PROTONVPN_BIN
     return None
 
 
 def _cli_presence() -> str:
-    parts = []
-    for candidate in (PROTONVPN_BIN, PROTONVPN_BIN_FALLBACK):
-        path = shutil.which(candidate)
-        parts.append(f"{candidate}={'found at ' + path if path else 'not found'}")
-    return "; ".join(parts)
+    path = shutil.which(PROTONVPN_BIN)
+    return f"{PROTONVPN_BIN}={'found at ' + path if path else 'not found'}"
 
 
 def _format_result(result: CLIResult) -> str:

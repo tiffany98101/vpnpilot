@@ -1,0 +1,77 @@
+name: Build RPM
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rpm:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    permissions:
+      contents: write
+    steps:
+      - name: Install build and test dependencies
+        run: |
+          dnf install -y \
+            git \
+            rpm-build \
+            rpmdevtools \
+            python3-devel \
+            python3-pip \
+            python3-packaging \
+            python3-pytest \
+            python3-pytest-asyncio \
+            python3-pytest-qt \
+            python3-pyqt6 \
+            python3-setuptools \
+            python3-wheel \
+            pyproject-rpm-macros \
+            desktop-file-utils \
+            xorg-x11-server-Xvfb \
+            mesa-libGL \
+            libxkbcommon-x11
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mark workspace safe for git archive
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pytest -q
+
+      - name: Build RPM and SRPM
+        run: ./scripts/build-rpm.sh
+
+      - name: Collect RPM artifacts
+        run: |
+          mkdir -p artifacts
+          find "$HOME/rpmbuild/RPMS" "$HOME/rpmbuild/SRPMS" \
+            -type f \( -name "*.rpm" -o -name "*.src.rpm" \) \
+            -exec cp -v {} artifacts/ \;
+
+      - name: Upload RPM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vpnpilot-rpms
+          path: artifacts/*.rpm
+          if-no-files-found: error
+
+      - name: Publish RPMs to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.rpm
