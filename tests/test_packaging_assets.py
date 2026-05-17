@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _read(path: str) -> str:
+    return (ROOT / path).read_text(encoding="utf-8")
+
+
+def test_desktop_file_has_expected_launcher_fields():
+    text = _read("packaging/vpnpilot.desktop")
+
+    assert "[Desktop Entry]" in text
+    assert "Name=VPNPilot" in text
+    assert "Comment=Proton VPN tray controller for Fedora KDE" in text
+    assert "Exec=vpnpilot" in text
+    assert "Icon=vpnpilot" in text
+    assert "Categories=Network;Utility;Qt;" in text
+    assert "X-VPNPilot-Managed=true" in text
+    assert "/home/" not in text
+
+
+def test_packaging_icon_exists_and_is_svg():
+    icon = ROOT / "packaging/icons/vpnpilot.svg"
+
+    assert icon.exists()
+    assert "<svg" in icon.read_text(encoding="utf-8")
+
+
+def test_appstream_metadata_exists():
+    text = _read("packaging/metainfo/vpnpilot.metainfo.xml")
+
+    assert "<id>vpnpilot.desktop</id>" in text
+    assert "<name>VPNPilot</name>" in text
+    assert "not affiliated" in text
+
+
+def test_local_install_scripts_are_executable_and_guard_overwrites():
+    install = ROOT / "scripts/install-local.sh"
+    uninstall = ROOT / "scripts/uninstall-local.sh"
+    install_text = install.read_text(encoding="utf-8")
+    uninstall_text = uninstall.read_text(encoding="utf-8")
+
+    assert os.access(install, os.X_OK)
+    assert os.access(uninstall, os.X_OK)
+    assert "Refusing to overwrite unrelated file" in install_text
+    assert "VPNPilot local launcher" in install_text
+    assert "PYTHONPATH" in install_text
+    assert "VPNPilot local launcher" in uninstall_text
+    assert "sudo" not in install_text
+    assert "sudo" not in uninstall_text
+
+
+def test_rpm_spec_installs_desktop_icon_and_metainfo():
+    text = _read("packaging/vpnpilot.spec")
+
+    assert "packaging/vpnpilot.desktop" in text
+    assert "packaging/icons/vpnpilot.svg" in text
+    assert "packaging/metainfo/vpnpilot.metainfo.xml" in text
+    assert "python3-pyqt6" in text
+    assert "proton-vpn-cli" in text
+
+
+def test_readme_mentions_local_install_logs_and_diagnostics():
+    text = _read("README.md")
+
+    assert "scripts/install-local.sh" in text
+    assert "scripts/uninstall-local.sh" in text
+    assert "~/.local/state/vpnpilot/vpnpilot.log" in text
+    assert "Copy Diagnostic Info" in text
+    assert "does not use Proton branding" in text

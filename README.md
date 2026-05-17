@@ -1,13 +1,13 @@
-# VPN Pilot
+# VPNPilot
 
-VPN Pilot is an unofficial third-party Linux desktop tray app for managing a Proton VPN connection.
+VPNPilot is an unofficial third-party Linux desktop tray app for managing a Proton VPN connection.
 
 It wraps the official `protonvpn` CLI and provides a small desktop UI for connection status, presets, country/city browsing, sign-in state, and common connect/disconnect actions.
 
 Repository: https://github.com/tiffany98101/vpnpilot
 
 > [!IMPORTANT]
-> VPN Pilot is not affiliated with, endorsed by, or supported by Proton AG. It does not replace Proton VPN's official Linux client.
+> VPNPilot is not affiliated with, endorsed by, or supported by Proton AG. It does not replace Proton VPN's official Linux client and does not use Proton branding.
 
 ## Screenshots
 
@@ -29,6 +29,7 @@ Repository: https://github.com/tiffany98101/vpnpilot
 - Editable preset library
 - Country/city server browser backed by Proton VPN CLI catalog data
 - Sign-in helper panel that copies `protonvpn signin <email>` and rechecks auth state
+- Troubleshooting/setup-help dialog with Copy Diagnostic Info and Open Log actions
 - Single-instance lock to prevent duplicate tray icons
 - `vpnpilot catalog dump` diagnostic command
 
@@ -37,14 +38,15 @@ Repository: https://github.com/tiffany98101/vpnpilot
 - Linux desktop with a working system tray
 - Fedora KDE Plasma tested
 - GNOME users need AppIndicator support
-- Official Proton VPN Linux CLI installed and signed in
-- NetworkManager
+- Official Proton VPN Linux CLI installed and signed in (`protonvpn` or `protonvpn-cli`)
+- NetworkManager tools (`nmcli`)
+- systemd resolver tools (`resolvectl`) for DNS diagnostics
 - Python 3.12+
 - PyQt6
 
 Do not run the official Proton VPN GUI app and the Proton VPN CLI at the same time.
 
-## Install from source
+## Run from source
 
 ```sh
 git clone https://github.com/tiffany98101/vpnpilot.git
@@ -64,7 +66,7 @@ If the script entry point is not on your shell path, run it from the project dir
 python -m vpnpilot
 ```
 
-## Developer install
+## Developer setup
 
 ```sh
 git clone https://github.com/tiffany98101/vpnpilot.git
@@ -80,6 +82,27 @@ Useful dev commands:
 make test
 make lint
 make clean
+```
+
+## Local KDE launcher install for testing
+
+For Fedora/KDE testing from a checkout, install a user-local launcher, desktop file, icon, and AppStream metadata:
+
+```sh
+make install-dev
+scripts/install-local.sh
+```
+
+Then start VPNPilot from the KDE application launcher, or run:
+
+```sh
+vpnpilot
+```
+
+To remove only the files installed by the local test installer:
+
+```sh
+scripts/uninstall-local.sh
 ```
 
 ## Build and install the RPM
@@ -103,7 +126,7 @@ vpnpilot
 
 ## First-time setup
 
-Install Proton VPN's official Linux CLI first and sign in there before using VPN Pilot.
+Install Proton VPN's official Linux CLI first and sign in there before using VPNPilot.
 
 Check that the CLI is available:
 
@@ -124,7 +147,7 @@ Check Proton VPN CLI status:
 protonvpn status
 ```
 
-Then start VPN Pilot:
+Then start VPNPilot:
 
 ```sh
 vpnpilot
@@ -137,13 +160,21 @@ vpnpilot
 3. Open the main window for details, presets, and the country/city browser.
 4. Create or edit presets for common locations.
 5. Use Connect/Disconnect from the tray or main UI.
-6. If something fails, run `vpnpilot` from a terminal so you can see diagnostic output.
+6. If something fails, open `Troubleshooting / Setup Help` from the tray.
 
-City targeting depends on Proton CLI `--city` behavior. VPN Pilot stores country and city context in presets for clarity, but city connects are still best-effort unless you use an exact server ID.
+City targeting depends on Proton CLI `--city` behavior. VPNPilot stores country and city context in presets for clarity, but city connects are still best-effort unless you use an exact server ID.
 
 ## Diagnostics
 
-Dump the Proton VPN CLI catalog data used by VPN Pilot:
+Runtime logs are written to:
+
+```text
+~/.local/state/vpnpilot/vpnpilot.log
+```
+
+Use the tray menu's `Copy Diagnostic Info` action to copy a redacted diagnostic report to the clipboard. It includes app version, Python/platform details, selected desktop session variables, Proton VPN CLI status, NetworkManager active connections, default route, DNS status, and the last app-level error when available.
+
+Dump the Proton VPN CLI catalog data used by VPNPilot:
 
 ```sh
 vpnpilot catalog dump
@@ -163,11 +194,18 @@ protonvpn status
 
 ## Scope and security notes
 
-VPN Pilot is a UI wrapper around Proton VPN's official CLI.
+VPNPilot is a UI wrapper around Proton VPN's official CLI.
 
 It does **not** implement VPN tunneling, WireGuard/OpenVPN handling, kill switch policy, DNS leak protection, split tunneling, or VPN security controls on its own.
 
 It should not need elevated privileges. VPN operations are delegated to Proton VPN CLI and the system services that CLI already uses.
+
+## Known limitations
+
+- Desktop tray behavior varies by desktop environment. Fedora KDE is the primary target.
+- Proton VPN CLI text output is parsed best-effort and may change between CLI releases.
+- VPNPilot should not be run at the same time as the official Proton VPN GUI.
+- The local install script is for developer testing, not a system package manager replacement.
 
 ## Project status
 

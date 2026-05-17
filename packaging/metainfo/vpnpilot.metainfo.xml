@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>vpnpilot.desktop</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>VPNPilot</name>
+  <summary>Proton VPN tray controller for Fedora KDE</summary>
+  <description>
+    <p>
+      VPNPilot is an unofficial tray application that wraps the official
+      Proton VPN Linux CLI. It provides status, presets, diagnostics, and
+      troubleshooting help for Fedora KDE testing.
+    </p>
+    <p>
+      VPNPilot is not affiliated with or endorsed by Proton AG and does not
+      use Proton branding.
+    </p>
+  </description>
+  <launchable type="desktop-id">vpnpilot.desktop</launchable>
+  <categories>
+    <category>Network</category>
+    <category>Utility</category>
+  </categories>
+  <provides>
+    <binary>vpnpilot</binary>
+  </provides>
+</component>

@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=vpnpilot
-GenericName=ProtonVPN Tray
-Comment=Unofficial tray UI for the ProtonVPN CLI
+Name=VPNPilot
+GenericName=VPN Tray Controller
+Comment=Proton VPN tray controller for Fedora KDE
 Exec=vpnpilot
 Icon=vpnpilot
 Terminal=false
-Categories=Network;Qt;
-Keywords=VPN;ProtonVPN;Tray;
+Categories=Network;Utility;Qt;
+Keywords=VPN;Proton;Network;Tray;
 StartupNotify=false
-X-GNOME-Autostart-enabled=true
+X-VPNPilot-Managed=true

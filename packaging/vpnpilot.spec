@@ -23,6 +23,8 @@ Requires:       proton-vpn-cli
 # Qt UI dependency (only one of vpnpilot's runtime deps that is in
 # Fedora repos; pydantic isn't used yet, qasync is bundled).
 Requires:       python3-pyqt6
+Recommends:     NetworkManager
+Recommends:     systemd-resolved
 # A working system tray is needed. On KDE Plasma it's built-in; on
 # GNOME the user installs the AppIndicator extension. We don't try
 # to require an extension from RPM.
@@ -56,8 +58,12 @@ install -Dm0644 packaging/vpnpilot.desktop \
 desktop-file-validate %{buildroot}%{_datadir}/applications/vpnpilot.desktop
 
 # Application icon (scalable hicolor)
-install -Dm0644 src/vpnpilot/resources/icon-app.svg \
+install -Dm0644 packaging/icons/vpnpilot.svg \
     %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/vpnpilot.svg
+
+# AppStream metadata
+install -Dm0644 packaging/metainfo/vpnpilot.metainfo.xml \
+    %{buildroot}%{_metainfodir}/vpnpilot.metainfo.xml
 
 %files -f %{pyproject_files}
 %license LICENSE
@@ -65,6 +71,7 @@ install -Dm0644 src/vpnpilot/resources/icon-app.svg \
 %{_bindir}/vpnpilot
 %{_datadir}/applications/vpnpilot.desktop
 %{_datadir}/icons/hicolor/scalable/apps/vpnpilot.svg
+%{_metainfodir}/vpnpilot.metainfo.xml
 
 %changelog
 * Thu May 14 2026 Tiffany von Arnim <tiffany.vonarnim@gmail.com> - 0.5.0-1
