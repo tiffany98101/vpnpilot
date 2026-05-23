@@ -2,7 +2,7 @@
 
 VPNPilot is an unofficial third-party Linux desktop tray app for managing a Proton VPN connection.
 
-It wraps the official `protonvpn` CLI and provides a small desktop UI for connection status, presets, country/city browsing, sign-in state, and common connect/disconnect actions.
+It can wrap the official `protonvpn` CLI, or control an imported Proton OpenVPN profile through NetworkManager, and provides a small desktop UI for connection status, presets, country/city browsing, sign-in state, and common connect/disconnect actions.
 
 Repository: https://github.com/tiffany98101/vpnpilot
 
@@ -28,6 +28,7 @@ Repository: https://github.com/tiffany98101/vpnpilot
 - Modeless main window with a connection status panel
 - Editable preset library
 - Country/city server browser backed by Proton VPN CLI catalog data
+- Optional NetworkManager OpenVPN backend for manually imported Proton profiles
 - Sign-in helper panel that copies `protonvpn signin <email>` and rechecks auth state
 - Troubleshooting/setup-help dialog with Copy Diagnostic Info and Open Log actions
 - Single-instance lock to prevent duplicate tray icons
@@ -38,7 +39,7 @@ Repository: https://github.com/tiffany98101/vpnpilot
 - Linux desktop with a working system tray
 - Fedora KDE Plasma tested
 - GNOME users need AppIndicator support
-- Official Proton VPN Linux CLI installed and signed in (`protonvpn`)
+- Official Proton VPN Linux CLI installed and signed in (`protonvpn`) for the default Proton CLI backend
 - NetworkManager tools (`nmcli`)
 - systemd resolver tools (`resolvectl`) for DNS diagnostics
 - Python 3.12+
@@ -190,6 +191,62 @@ Then start VPNPilot:
 vpnpilot
 ```
 
+## Using a manual Proton OpenVPN NetworkManager profile
+
+VPNPilot can use an imported NetworkManager OpenVPN profile instead of calling `protonvpn connect`. This is useful on systems where the official Proton VPN Linux CLI/app is unreliable or its kill-switch path interferes with routing or DNS.
+
+Import the Proton OpenVPN profile:
+
+```sh
+nmcli connection import type openvpn file ~/Documents/us-dc-281.protonvpn.tcp.ovpn
+```
+
+Manual Proton OpenVPN profiles use Proton's OpenVPN/IKEv2 username and password from the Proton VPN account settings. They do not use the normal Proton account password. VPNPilot does not store VPN passwords, OpenVPN credentials, Proton credentials, tokens, or `.ovpn` file contents.
+
+Configure VPNPilot to use the imported profile:
+
+```sh
+vpnpilot backend set \
+  --backend networkmanager-openvpn \
+  --networkmanager-profile us-dc-281.protonvpn.tcp
+```
+
+The same setting can be written by editing `~/.config/vpnpilot/settings.json`:
+
+```json
+{
+  "backend": "networkmanager-openvpn",
+  "networkmanager_profile": "us-dc-281.protonvpn.tcp",
+  "prefer_active_nm_vpn": true,
+  "nmcli_timeout_seconds": 20,
+  "version": 1
+}
+```
+
+You can verify or connect the profile directly:
+
+```sh
+nmcli connection up us-dc-281.protonvpn.tcp
+vpnpilot backend status
+```
+
+Backend choices are:
+
+- `auto`: prefer an active NetworkManager VPN; prefer the configured NetworkManager profile when it exists; otherwise use the Proton CLI.
+- `proton-cli`: keep the original `protonvpn` CLI behavior.
+- `networkmanager-openvpn`: use `nmcli connection up/down <profile>`.
+
+This mode bypasses the official Proton CLI/app kill-switch path. VPNPilot intentionally does not manage Proton's `pvpn-killswitch` or `pvpnksintrf0` interfaces, and it does not delete NetworkManager profiles.
+
+Troubleshooting commands:
+
+```sh
+nmcli connection show --active
+ip route
+resolvectl status
+curl -4 https://ifconfig.me
+```
+
 ## Basic usage
 
 1. Start `vpnpilot`.
@@ -209,7 +266,7 @@ Runtime logs are written to:
 ~/.local/state/vpnpilot/vpnpilot.log
 ```
 
-Use the tray menu's `Copy Diagnostic Info` action to copy a redacted diagnostic report to the clipboard. It includes app version, Python/platform details, selected desktop session variables, Proton VPN CLI status, NetworkManager active connections, default route, DNS status, and the last app-level error when available.
+Use the tray menu's `Copy Diagnostic Info` action to copy a redacted diagnostic report to the clipboard. It includes app version, Python/platform details, selected desktop session variables, Proton VPN CLI status, NetworkManager active connections and VPN profiles, interface summary, default route, DNS status, and the last app-level error when available.
 
 Dump the Proton VPN CLI catalog data used by VPNPilot:
 
@@ -231,17 +288,18 @@ protonvpn status
 
 ## Scope and security notes
 
-VPNPilot is a UI wrapper around Proton VPN's official CLI.
+VPNPilot is a UI wrapper around Proton VPN's official CLI or an existing NetworkManager VPN profile.
 
 It does **not** implement VPN tunneling, WireGuard/OpenVPN handling, kill switch policy, DNS leak protection, split tunneling, or VPN security controls on its own.
 
-It should not need elevated privileges. VPN operations are delegated to Proton VPN CLI and the system services that CLI already uses.
+It should not need elevated privileges. VPN operations are delegated to Proton VPN CLI, NetworkManager, and the system services those tools already use.
 
 ## Known limitations
 
 - Desktop tray behavior varies by desktop environment. Fedora KDE is the primary target.
 - Proton VPN CLI text output is parsed best-effort and may change between CLI releases.
 - VPNPilot should not be run at the same time as the official Proton VPN GUI.
+- The NetworkManager backend controls already-imported profiles; it does not import `.ovpn` files or manage credentials.
 - The local install script is for developer testing, not a system package manager replacement.
 
 ## Project status

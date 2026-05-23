@@ -41,4 +41,9 @@ class ConnectionInfo:
     load_percent: int | None = None
     public_ip: str | None = None
     interface: str | None = None
+    backend: str | None = None
+    backend_reason: str | None = None
+    active_profile: str | None = None
+    default_route_device: str | None = None
+    dns_summary: str | None = None
     error: str | None = None

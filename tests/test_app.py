@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from vpnpilot import app as app_mod
+from vpnpilot.settings import AppSettings
 
 
 class FakeApplication:
@@ -44,6 +45,8 @@ def test_main_shows_clear_error_when_proton_cli_missing(monkeypatch):
     monkeypatch.setattr(app_mod, "_app_icon", lambda: object())
     monkeypatch.setattr(app_mod, "ensure_tray_available", lambda _app: True)
     monkeypatch.setattr(app_mod, "ProtonCLI", MissingProtonCLI)
+    monkeypatch.setattr(app_mod, "_active_nm_vpn_exists", lambda: False)
+    monkeypatch.setattr(app_mod, "SettingsStore", FakeSettingsStore)
     monkeypatch.setattr(
         app_mod.QMessageBox,
         "critical",
@@ -126,6 +129,11 @@ class FakeProtonCLI:
         return True
 
 
+class FakeSettingsStore:
+    def load(self):
+        return AppSettings()
+
+
 def test_main_does_not_prewarm_catalog_or_load_cities_on_startup(monkeypatch):
     FakeController.instances.clear()
     FakeCatalog.instances.clear()
@@ -144,6 +152,8 @@ def test_main_does_not_prewarm_catalog_or_load_cities_on_startup(monkeypatch):
     monkeypatch.setattr(app_mod.asyncio, "set_event_loop", lambda _loop: None)
     monkeypatch.setattr(app_mod.signal, "signal", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_mod, "ProtonCLI", FakeProtonCLI)
+    monkeypatch.setattr(app_mod, "_active_nm_vpn_exists", lambda: False)
+    monkeypatch.setattr(app_mod, "SettingsStore", FakeSettingsStore)
     monkeypatch.setattr(app_mod, "default_detector", lambda _cli: object())
     monkeypatch.setattr(app_mod, "JsonStateStore", lambda: object())
     monkeypatch.setattr(app_mod, "PresetStore", lambda: MagicMock(load=lambda: None))

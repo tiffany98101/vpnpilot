@@ -95,6 +95,11 @@ class TrayApp:
         self._server_action.setVisible(False)
         self._menu.addAction(self._server_action)
 
+        self._backend_action = QAction("")
+        self._backend_action.setEnabled(False)
+        self._backend_action.setVisible(False)
+        self._menu.addAction(self._backend_action)
+
         self._menu.addSeparator()
 
         # Open main window — present in every auth/connection state.
@@ -211,9 +216,7 @@ class TrayApp:
         for p in presets:
             act = submenu.addAction(_preset_menu_label(p))
             pid = p.id
-            act.triggered.connect(
-                lambda checked=False, x=pid: self._controller.connect_preset(x)
-            )
+            act.triggered.connect(lambda checked=False, x=pid: self._controller.connect_preset(x))
         submenu_action = self._menu.insertMenu(self._disconnect_action, submenu)
         self._dynamic_actions.append(submenu_action)
         self._connect_submenu = submenu
@@ -375,6 +378,7 @@ class TrayApp:
             self._tray.setIcon(_icon("icon-signed-out.svg"))
             self._status_action.setText("Status: not signed in")
             self._server_action.setVisible(False)
+            self._backend_action.setVisible(False)
             self._signin_action.setVisible(True)
             self._disconnect_action.setEnabled(info.state is ConnState.CONNECTED)
             self._apply_state_to_dynamic_actions(info)
@@ -394,6 +398,7 @@ class TrayApp:
                     self._server_action.setVisible(True)
                 else:
                     self._server_action.setVisible(False)
+                self._render_backend_line(info)
                 self._disconnect_action.setEnabled(True)
                 tip = "vpnpilot — connected"
                 if info.server:
@@ -403,39 +408,53 @@ class TrayApp:
                 self._tray.setIcon(_icon("icon-transitioning.svg"))
                 self._status_action.setText("Status: working…")
                 self._server_action.setVisible(False)
+                self._render_backend_line(info)
                 self._disconnect_action.setEnabled(False)
                 self._tray.setToolTip("vpnpilot — working…")
             case ConnState.CLI_MISSING:
                 self._tray.setIcon(_icon("icon-disconnected.svg"))
                 self._status_action.setText("Status: ProtonVPN CLI not found")
                 self._server_action.setVisible(False)
+                self._render_backend_line(info)
                 self._disconnect_action.setEnabled(False)
                 self._tray.setToolTip("vpnpilot — ProtonVPN CLI not found")
             case ConnState.CLI_ERROR:
                 self._tray.setIcon(_icon("icon-disconnected.svg"))
                 self._status_action.setText("Status: ProtonVPN CLI error")
                 self._server_action.setVisible(False)
+                self._render_backend_line(info)
                 self._disconnect_action.setEnabled(False)
                 self._tray.setToolTip("vpnpilot — ProtonVPN CLI error")
             case ConnState.NETWORK_OFFLINE:
                 self._tray.setIcon(_icon("icon-disconnected.svg"))
                 self._status_action.setText("Status: network offline")
                 self._server_action.setVisible(False)
+                self._render_backend_line(info)
                 self._disconnect_action.setEnabled(False)
                 self._tray.setToolTip("vpnpilot — network offline")
             case ConnState.UNKNOWN:
                 self._tray.setIcon(_icon("icon-disconnected.svg"))
                 self._status_action.setText("Status: unknown")
                 self._server_action.setVisible(False)
+                self._render_backend_line(info)
                 self._disconnect_action.setEnabled(False)
                 self._tray.setToolTip("vpnpilot — status unknown")
             case _:
                 self._tray.setIcon(_icon("icon-disconnected.svg"))
                 self._status_action.setText("Status: disconnected")
                 self._server_action.setVisible(False)
+                self._render_backend_line(info)
                 self._disconnect_action.setEnabled(False)
                 self._tray.setToolTip("vpnpilot — disconnected")
         self._apply_state_to_dynamic_actions(info)
+
+    def _render_backend_line(self, info: ConnectionInfo) -> None:
+        if not info.backend:
+            self._backend_action.setVisible(False)
+            return
+        suffix = f" — {info.active_profile}" if info.active_profile else ""
+        self._backend_action.setText(f"Backend: {info.backend}{suffix}")
+        self._backend_action.setVisible(True)
 
 
 def ensure_tray_available(parent_app: QApplication) -> bool:

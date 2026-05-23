@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from vpnpilot.settings import AppSettings, SettingsStore
 from vpnpilot.user_state import JsonStateStore, NullPersistence
 
 
@@ -74,3 +75,30 @@ def test_json_store_poll_interval_round_trip(tmp_path):
     s.set_poll_interval_key("5m")
     assert s.poll_interval_key() == "5m"
     assert JsonStateStore(path=path).poll_interval_key() == "5m"
+
+
+def test_settings_store_round_trip(tmp_path):
+    path = tmp_path / "settings.json"
+    s = SettingsStore(path=path)
+    settings = AppSettings(
+        backend="networkmanager-openvpn",
+        networkmanager_profile="us-dc-281.protonvpn.tcp",
+    )
+    s.save(settings)
+
+    loaded = SettingsStore(path=path).load()
+    assert loaded.backend == "networkmanager-openvpn"
+    assert loaded.networkmanager_profile == "us-dc-281.protonvpn.tcp"
+    assert (path.stat().st_mode & 0o777) == 0o600
+
+
+def test_settings_store_sanitizes_invalid_values(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(
+        '{"backend": "bad", "networkmanager_profile": 12, "nmcli_timeout_seconds": 0}',
+        encoding="utf-8",
+    )
+    loaded = SettingsStore(path=path).load()
+    assert loaded.backend == "auto"
+    assert loaded.networkmanager_profile == ""
+    assert loaded.nmcli_timeout_seconds == 3.0

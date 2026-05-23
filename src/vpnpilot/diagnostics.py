@@ -127,8 +127,22 @@ def _command_specs() -> list[CommandSpec]:
     specs.extend(
         [
             CommandSpec(
-                "NetworkManager active connections", ["nmcli", "connection", "show", "--active"]
+                "NetworkManager active connections",
+                [
+                    "nmcli",
+                    "-t",
+                    "-f",
+                    "NAME,UUID,TYPE,DEVICE",
+                    "connection",
+                    "show",
+                    "--active",
+                ],
             ),
+            CommandSpec(
+                "NetworkManager VPN profiles",
+                ["nmcli", "-t", "-f", "NAME,UUID,TYPE", "connection", "show"],
+            ),
+            CommandSpec("interfaces", ["ip", "-br", "addr"]),
             CommandSpec("default route", ["ip", "route"]),
             CommandSpec("DNS status", ["resolvectl", "status"]),
         ]

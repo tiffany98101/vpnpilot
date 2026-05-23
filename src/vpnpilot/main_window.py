@@ -95,6 +95,10 @@ class StatusPanel(QFrame):
         self.protocol_label.setObjectName("statusProtocol")
         self.protocol_label.setVisible(False)
 
+        self.backend_label = QLabel("")
+        self.backend_label.setObjectName("statusBackend")
+        self.backend_label.setVisible(False)
+
         self.auth_label = QLabel("(Not signed in)")
         self.auth_label.setObjectName("statusAuth")
         self.auth_label.setStyleSheet("color: #c00; font-weight: 600;")
@@ -112,6 +116,7 @@ class StatusPanel(QFrame):
 
         layout.addWidget(self.server_label)
         layout.addWidget(self.protocol_label)
+        layout.addWidget(self.backend_label)
 
     def render(self, info: ConnectionInfo) -> None:
         self.state_label.setText(_STATE_TEXT.get(info.state, str(info.state)))
@@ -130,6 +135,21 @@ class StatusPanel(QFrame):
             self.protocol_label.setVisible(True)
         else:
             self.protocol_label.setVisible(False)
+
+        backend_bits = []
+        if info.backend:
+            backend_bits.append(f"Backend: {info.backend}")
+        if info.active_profile:
+            backend_bits.append(f"Profile: {info.active_profile}")
+        if info.default_route_device:
+            backend_bits.append(f"Default route: {info.default_route_device}")
+        if info.dns_summary:
+            backend_bits.append(f"DNS: {info.dns_summary}")
+        if backend_bits:
+            self.backend_label.setText(" | ".join(backend_bits))
+            self.backend_label.setVisible(True)
+        else:
+            self.backend_label.setVisible(False)
 
         self.auth_label.setVisible(info.auth is AuthState.SIGNED_OUT)
 

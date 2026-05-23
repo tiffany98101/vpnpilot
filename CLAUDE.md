@@ -168,7 +168,15 @@ Module roles:
 - `user_state.py` — `JsonStateStore` persists *observed* state (last
   signed-in email) to `~/.config/vpnpilot/state.json` (0600). This is
   distinct from `presets.json` (user-curated presets) and from
-  `settings.json` (user preferences, not yet implemented).
+  `settings.json` (user preferences).
+- `settings.py` — `SettingsStore` persists backend preferences to
+  `~/.config/vpnpilot/settings.json` (0600). Current keys are `backend`,
+  `networkmanager_profile`, `prefer_active_nm_vpn`, and
+  `nmcli_timeout_seconds`.
+- `backend.py` / `networkmanager.py` — backend selection and
+  NetworkManager OpenVPN control. Auto mode treats an active
+  NetworkManager VPN as authoritative, then prefers a configured
+  NetworkManager profile, then falls back to Proton CLI.
 - `catalog/` — `ServerCatalog(QObject)`: in-memory, session-scoped country
   and city catalog. `async countries()` caches on first call; `cities(code)`
   returns a `CatalogEntry` immediately and kicks off a background fetch if the
@@ -354,9 +362,10 @@ forward-compatibility matters.
   default. Invariants: `len(presets) >= 1`, exactly one
   `is_default == true`, names unique. Default preset is always at
   index 0 of `list_all()`.
-- **User settings (not yet implemented)**: `settings.json`. Will hold
-  toggles like kill-switch, autoconnect, public-IP endpoint. Will be a
-  pydantic v2 model.
+- **User settings**: `settings.json` — backend preferences:
+  `backend` (`auto`, `proton-cli`, or `networkmanager-openvpn`),
+  `networkmanager_profile`, `prefer_active_nm_vpn`, and
+  `nmcli_timeout_seconds`. Managed by `SettingsStore` (`settings.py`).
 
 Event log (not yet implemented): `~/.local/state/vpnpilot/events.log`
 (XDG state), rolling ~500 entries. Never logs CLI output verbatim —

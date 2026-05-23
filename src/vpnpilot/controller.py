@@ -14,8 +14,10 @@ import re
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from .backend import ProtonCLIBackend, VPNBackend
 from .cli import ProtonCLI
 from .detect import Detector
+from .networkmanager import NM_BACKEND_NAME
 from .preset import PresetStore, preset_to_connect_kwargs
 from .state import AuthState, ConnectionInfo, ConnState
 from .user_state import NullPersistence, Persistence
@@ -46,6 +48,7 @@ class Controller(QObject):
         cli: ProtonCLI,
         detector: Detector,
         *,
+        backend: VPNBackend | None = None,
         poll_interval: float | None | object = _PERSISTED_POLL_INTERVAL,
         min_refresh_interval: float = MIN_REFRESH_INTERVAL_SECONDS,
         persistence: Persistence | None = None,
@@ -54,6 +57,7 @@ class Controller(QObject):
         super().__init__()
         self._cli = cli
         self._detector = detector
+        self._backend = backend or ProtonCLIBackend(cli, detector)
         self._min_refresh_interval = min_refresh_interval
         self._persistence = persistence or NullPersistence()
         self._poll_interval_key = DEFAULT_POLL_INTERVAL_KEY
@@ -104,7 +108,7 @@ class Controller(QObject):
         # Disconnect is intentionally not gated — it works even with no
         # session, and we want it available as a recovery path if our
         # detection is somehow wrong.
-        if self._current.auth is AuthState.SIGNED_OUT:
+        if self._requires_auth_gate() and self._current.auth is AuthState.SIGNED_OUT:
             self._emit_error("Sign in to ProtonVPN first.")
             return
         if self._preset_store is None:
@@ -122,7 +126,7 @@ class Controller(QObject):
         Routes through the same _do_connect path as connect_preset.
         Gated on auth state — no-ops with error signal when signed out.
         """
-        if self._current.auth is AuthState.SIGNED_OUT:
+        if self._requires_auth_gate() and self._current.auth is AuthState.SIGNED_OUT:
             self._emit_error("Sign in to ProtonVPN first.")
             return
         if city:
@@ -138,7 +142,7 @@ class Controller(QObject):
         caller can surface a client-side error without a round-trip.
         Gated on auth state — no-ops with error signal when signed out.
         """
-        if self._current.auth is AuthState.SIGNED_OUT:
+        if self._requires_auth_gate() and self._current.auth is AuthState.SIGNED_OUT:
             self._emit_error("Sign in to ProtonVPN first.")
             return
         normalized = server_id.strip().upper()
@@ -197,10 +201,13 @@ class Controller(QObject):
             return
         self._in_flight = asyncio.create_task(coro)
 
+    def _requires_auth_gate(self) -> bool:
+        return self._current.backend != NM_BACKEND_NAME
+
     async def _do_connect(self, **kwargs) -> None:
         log.info("connect requested: %s", _summarize_connect_kwargs(kwargs))
         self._set(ConnectionInfo(state=ConnState.TRANSITIONING))
-        result = await self._cli.connect(**kwargs)
+        result = await self._backend.connect(**kwargs)
         if not result.ok:
             log.warning("connect failed: rc=%s stderr=%r", result.returncode, result.stderr)
             self._emit_error(_short_err(result))
@@ -210,7 +217,7 @@ class Controller(QObject):
     async def _do_disconnect(self) -> None:
         log.info("disconnect requested")
         self._set(ConnectionInfo(state=ConnState.TRANSITIONING))
-        result = await self._cli.disconnect()
+        result = await self._backend.disconnect()
         if not result.ok:
             log.warning("disconnect failed: rc=%s stderr=%r", result.returncode, result.stderr)
             self._emit_error(_short_err(result))
@@ -259,7 +266,7 @@ class Controller(QObject):
     async def _run_refresh_state(self) -> None:
         log.debug("refreshing status")
         try:
-            info = await self._detector.detect()
+            info = await self._backend.detect()
         except Exception:  # noqa: BLE001
             log.exception("detector raised; treating as disconnected")
             self._last_error = "detector error"
@@ -288,7 +295,7 @@ class Controller(QObject):
 def _short_err(result) -> str:
     blob = (result.stderr or result.stdout or "").strip()
     if not blob:
-        return f"protonvpn exited {result.returncode}"
+        return f"command exited {result.returncode}"
     # Pick the first non-empty line; CLI errors are typically one line anyway.
     return blob.splitlines()[0][:200]
 
