@@ -18,6 +18,21 @@ NM_BACKEND_NAME = "networkmanager-openvpn"
 VPN_TYPES = frozenset({"vpn", "wireguard"})
 _PROTON_PROFILE_RE = re.compile(r"(^|[.\s_-])proton(?:vpn)?([.\s_-]|$)|proton\s+vpn", re.IGNORECASE)
 _DEFAULT_ROUTE_RE = re.compile(r"^default\b.*\bdev\s+(?P<dev>\S+)")
+_RESOLVECTL_FIELD_PREFIXES = (
+    "Current Scopes:",
+    "DefaultRoute setting:",
+    "Default Route:",
+    "DNS Domain:",
+    "DNS Domains:",
+    "DNSSEC NTA:",
+    "DNSSEC supported:",
+    "DNSSEC setting:",
+    "DNSSEC:",
+    "DNSOverTLS setting:",
+    "LLMNR setting:",
+    "MulticastDNS setting:",
+    "Protocols:",
+)
 
 
 @dataclass(frozen=True)
@@ -160,6 +175,7 @@ def dns_summary(resolvectl_output: str, device: str | None = None) -> str | None
     current_name: str | None = None
     servers: list[str] = []
     current_server: str | None = None
+    collecting_servers = False
     for raw in lines:
         line = raw.rstrip()
         link = re.match(r"^Link\s+\d+\s+\((?P<name>[^)]+)\)", line.strip())
@@ -170,24 +186,45 @@ def dns_summary(resolvectl_output: str, device: str | None = None) -> str | None
             current_name = link.group("name")
             servers = []
             current_server = None
+            collecting_servers = False
             continue
         if current_name is None:
             continue
         stripped = line.strip()
         if stripped.startswith("Current DNS Server:"):
             current_server = stripped.split(":", 1)[1].strip()
+            collecting_servers = False
         elif stripped.startswith("DNS Servers:"):
             servers.extend(stripped.split(":", 1)[1].strip().split())
+            collecting_servers = True
+        elif collecting_servers and raw[:1].isspace() and not _is_resolvectl_field(stripped):
+            servers.extend(stripped.split())
+        elif stripped:
+            collecting_servers = False
 
     if device and current_name != device:
         # Fallback for older/system variants where link names are missing from truncation.
         return None
-    selected = current_server or (servers[0] if servers else None)
+    selected = _dedupe(([current_server] if current_server else []) + servers)
     if selected and current_name:
-        return f"{current_name}: {selected}"
+        return f"{current_name}: {', '.join(selected)}"
     if current_link:
         return current_link
     return None
+
+
+def _is_resolvectl_field(stripped: str) -> bool:
+    return stripped.startswith(_RESOLVECTL_FIELD_PREFIXES)
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            out.append(value)
+    return out
 
 
 class NetworkManagerOpenVPN:

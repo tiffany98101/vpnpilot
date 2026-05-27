@@ -113,6 +113,29 @@ Current DNS Server: 10.98.0.1
     assert dns_summary(resolvectl, "tun0") == "tun0: 10.98.0.1"
 
 
+def test_dns_summary_includes_wrapped_dns_servers():
+    resolvectl = """\
+Global
+Link 9 (tun0)
+    Current Scopes: DNS
+       DNS Servers: 10.98.0.1
+                    192.0.2.53
+    Default Route: yes
+"""
+    assert dns_summary(resolvectl, "tun0") == "tun0: 10.98.0.1, 192.0.2.53"
+
+
+def test_dns_summary_includes_three_line_wrapped_dns_servers():
+    resolvectl = """\
+Link 9 (tun0)
+       DNS Servers: 10.98.0.1
+                    192.0.2.53
+                    2001:db8::53
+       DNS Domain: ~.
+"""
+    assert dns_summary(resolvectl, "tun0") == "tun0: 10.98.0.1, 192.0.2.53, 2001:db8::53"
+
+
 @pytest.mark.asyncio
 async def test_configured_profile_found(monkeypatch):
     nm = NetworkManagerOpenVPN(profile_name="us-dc-281.protonvpn.tcp")
