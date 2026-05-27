@@ -28,3 +28,25 @@
 - Original review note: operational/laptop-mobility axes are intentionally not part of this run and need a separate adversarial pass: suspend/resume, captive portal, link flap, IPv6-only links, and system clock jumps.
 
 pytest: 353 passed
+
+## Operational and laptop-mobility pass
+
+- Stale state after suspend/resume: `5ad9d79`, axis A, tests delta `+1`.
+- Captive portal state hidden behind generic route checks: `13f5b53`, axis B, tests delta `+9`.
+- IPv6-only links reported offline without nmcli connectivity: `8af9dae`, axis D, tests delta `+1`.
+- Axis C (link flap tunnel handling): delegated, evidence at `src/vpnpilot/cli.py:71`, `src/vpnpilot/networkmanager.py:404`.
+- Axis E (system clock jump): delegated, evidence at `src/vpnpilot/controller.py:267`, `src/vpnpilot/diagnostics.py:57`, `src/vpnpilot/catalog/service.py:217`.
+
+### Decisions
+
+- The suspend/resume fix uses a tray-owned wake watchdog that calls the existing `force_refresh` path, because refreshing state preserves the invariant that process exit must not tear down an active tunnel.
+- Captive portal detection uses `nmcli -t -f CONNECTIVITY general` before route probing, because NetworkManager already classifies portal and limited links and the existing route check cannot.
+- Captive portal and limited-network states block new connect attempts from cached state, because launching Proton while NetworkManager says the link is not fully online produces slow generic failures.
+- The IPv6-only fix only adds an `ip -6 route` fallback when nmcli connectivity is unavailable, because NetworkManager's own connectivity result should remain authoritative when present.
+- No automatic reconnect/retry was added after captive-portal authentication or link restore, because retry policy needs event-driven NetworkManager signals and user-intent tracking rather than a blind command replay.
+
+### Deferred
+
+- `src/vpnpilot/controller.py:244`: ordinary NetworkManager link-flap, captive-portal-auth, and non-suspend connectivity changes still rely on periodic polling; the durable fix is an event-driven NetworkManager/logind DBus subscription layer that calls the existing force-refresh path without disconnecting active tunnels.
+
+pytest: 364 passed
