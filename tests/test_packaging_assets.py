@@ -117,6 +117,11 @@ def test_protonvpn_cli_fedora_helper_is_safe_and_executable():
     assert "set -euo pipefail" in text
     assert "/etc/os-release" in text
     assert "protonvpn-stable-release" in text
+    assert "RELEASE_SHA256_BY_FEDORA" in text
+    assert "GPG_FINGERPRINT_BY_FEDORA" in text
+    assert "sha256sum" in text
+    assert "gpg --show-keys --with-colons --fingerprint" in text
+    assert "dnf check-update --refresh" in text
     assert "sudo dnf install proton-vpn-cli" in text
     assert "credentials" in text
 
