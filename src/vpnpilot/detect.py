@@ -228,14 +228,27 @@ class NetworkStatusDetector(Detector):
                 state=ConnState.UNKNOWN,
                 error=(result.stderr or result.stdout).strip() or "ip route failed",
             )
-        has_default_route = any(
+        if not self._has_default_route(result.stdout):
+            v6_result = await _run_command([self._ip, "-6", "route"], timeout=3.0)
+            if v6_result.returncode == 127:
+                return ConnectionInfo(state=ConnState.UNKNOWN, error=v6_result.stderr)
+            if not v6_result.ok:
+                return ConnectionInfo(
+                    state=ConnState.UNKNOWN,
+                    error=(v6_result.stderr or v6_result.stdout).strip() or "ip -6 route failed",
+                )
+            if not self._has_default_route(v6_result.stdout):
+                return ConnectionInfo(state=ConnState.NETWORK_OFFLINE)
+            return ConnectionInfo(state=ConnState.DISCONNECTED)
+        return ConnectionInfo(state=ConnState.DISCONNECTED)
+
+    @staticmethod
+    def _has_default_route(stdout: str) -> bool:
+        return any(
             line.split(maxsplit=1)[0] == "default"
-            for line in result.stdout.splitlines()
+            for line in stdout.splitlines()
             if line.strip()
         )
-        if not has_default_route:
-            return ConnectionInfo(state=ConnState.NETWORK_OFFLINE)
-        return ConnectionInfo(state=ConnState.DISCONNECTED)
 
     async def _nm_connectivity(self) -> str | None:
         result = await _run_command(

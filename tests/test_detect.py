@@ -192,12 +192,44 @@ async def test_network_status_detector_offline_when_no_default_route(monkeypatch
     async def fake_run(argv, *, timeout):
         if argv[0] == "nmcli":
             return CLIResult(returncode=127, stdout="", stderr="nmcli: not found")
+        if argv == ["ip", "-6", "route"]:
+            return CLIResult(returncode=0, stdout="fe80::/64 dev wlan0 proto kernel\n", stderr="")
         return CLIResult(returncode=0, stdout="10.0.0.0/24 dev eth0\n", stderr="")
 
     monkeypatch.setattr("vpnpilot.detect._run_command", fake_run)
     det = NetworkStatusDetector()
     info = await det.detect()
     assert info.state is ConnState.NETWORK_OFFLINE
+
+
+@pytest.mark.asyncio
+async def test_network_status_detector_accepts_ipv6_default_route(monkeypatch):
+    calls: list[list[str]] = []
+
+    async def fake_run(argv, *, timeout):
+        calls.append(argv)
+        if argv[0] == "nmcli":
+            return CLIResult(returncode=127, stdout="", stderr="nmcli: not found")
+        if argv == ["ip", "route"]:
+            return CLIResult(returncode=0, stdout="10.0.0.0/24 dev wlan0\n", stderr="")
+        if argv == ["ip", "-6", "route"]:
+            return CLIResult(
+                returncode=0,
+                stdout="default via fe80::1 dev wlan0 proto ra metric 1024\n",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv!r}")
+
+    monkeypatch.setattr("vpnpilot.detect._run_command", fake_run)
+    det = NetworkStatusDetector()
+    info = await det.detect()
+
+    assert info.state is ConnState.DISCONNECTED
+    assert calls == [
+        ["nmcli", "-t", "-f", "CONNECTIVITY", "general"],
+        ["ip", "route"],
+        ["ip", "-6", "route"],
+    ]
 
 
 @pytest.mark.parametrize(
