@@ -218,6 +218,24 @@ def test_refresh_now_routes_to_controller(qapp_instance, store):
     ctrl.force_refresh.assert_called_once_with()
 
 
+def test_wake_watchdog_forces_refresh_after_suspend_gap(qapp_instance, store):
+    ctrl = FakeController()
+    monotonic_values = [100.0, 100.5]
+    wall_values = [1000.0, 1300.0]
+    tray = TrayApp(
+        qapp_instance,
+        ctrl,
+        preset_store=store,
+        monotonic_clock=lambda: monotonic_values.pop(0),
+        wall_clock=lambda: wall_values.pop(0),
+    )
+    tray._wake_timer.stop()
+
+    tray._check_wake_or_clock_jump()
+
+    ctrl.force_refresh.assert_called_once_with()
+
+
 def test_refresh_interval_menu_marks_current_selection(qapp_instance, store):
     ctrl = FakeController()
     ctrl.poll_interval_key = "5m"

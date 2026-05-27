@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from importlib.resources import files
 
@@ -27,6 +28,8 @@ from .user_state import NullPersistence, Persistence
 
 log = logging.getLogger(__name__)
 _GUI_CONFLICT_POLL_MS = 15000
+_WAKE_CHECK_INTERVAL_MS = 30000
+_WAKE_REFRESH_THRESHOLD_SECONDS = 90.0
 
 
 def _preset_menu_label(preset: Preset) -> str:
@@ -50,6 +53,8 @@ class TrayApp:
         persistence: Persistence | None = None,
         catalog: ServerCatalog | None = None,
         official_gui_detector: Callable[[], list[int]] | None = None,
+        monotonic_clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], float] = time.time,
     ) -> None:
         self._app = app
         self._controller = controller
@@ -58,6 +63,10 @@ class TrayApp:
         self._catalog = catalog
         self._official_gui_detector = official_gui_detector or detect_official_proton_gui_processes
         self._last_gui_conflict_pids: set[int] = set()
+        self._monotonic_clock = monotonic_clock
+        self._wall_clock = wall_clock
+        self._last_wake_check_monotonic = self._monotonic_clock()
+        self._last_wake_check_wall = self._wall_clock()
         self._tray = QSystemTrayIcon()
         self._tray.setToolTip(f"{APP_NAME} {__version__}")
         self._signin_panel: SignInPanel | None = None
@@ -66,11 +75,15 @@ class TrayApp:
         self._gui_conflict_timer = QTimer(self._tray)
         self._gui_conflict_timer.setInterval(_GUI_CONFLICT_POLL_MS)
         self._gui_conflict_timer.timeout.connect(self._check_official_gui_conflict)
+        self._wake_timer = QTimer(self._tray)
+        self._wake_timer.setInterval(_WAKE_CHECK_INTERVAL_MS)
+        self._wake_timer.timeout.connect(self._check_wake_or_clock_jump)
         self._diagnostics_task: asyncio.Task | None = None
         self._build_menu()
         self._connect_signals()
         self._render(controller.current)
         self._gui_conflict_timer.start()
+        self._wake_timer.start()
 
     def show(self) -> None:
         self._tray.show()
@@ -242,6 +255,24 @@ class TrayApp:
         # previously had no .activated handler, so this is purely
         # additive — context menu (right-click) keeps working as before.
         self._tray.activated.connect(self._on_tray_activated)
+
+    def _check_wake_or_clock_jump(self) -> None:
+        now_monotonic = self._monotonic_clock()
+        now_wall = self._wall_clock()
+        monotonic_elapsed = max(0.0, now_monotonic - self._last_wake_check_monotonic)
+        wall_elapsed = max(0.0, now_wall - self._last_wake_check_wall)
+        self._last_wake_check_monotonic = now_monotonic
+        self._last_wake_check_wall = now_wall
+
+        if max(monotonic_elapsed, wall_elapsed) < _WAKE_REFRESH_THRESHOLD_SECONDS:
+            return
+        log.info(
+            "wake or clock jump detected; forcing status refresh "
+            "(monotonic_elapsed=%.1fs wall_elapsed=%.1fs)",
+            monotonic_elapsed,
+            wall_elapsed,
+        )
+        self._controller.force_refresh()
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
