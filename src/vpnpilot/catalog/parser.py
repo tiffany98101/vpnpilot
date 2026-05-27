@@ -13,6 +13,7 @@ from .models import City, CityFeature, Country
 
 # Split on 2+ whitespace to separate columns in the tabular output.
 _COL_SEP = re.compile(r"\s{2,}")
+_KNOWN_FEATURE_VALUES = frozenset(feature.value for feature in CityFeature)
 
 
 def parse_countries(stdout: str) -> list[Country]:
@@ -32,10 +33,11 @@ def parse_countries(stdout: str) -> list[Country]:
         stripped = line.strip()
         if not stripped:
             continue
-        parts = _COL_SEP.split(stripped)
-        if len(parts) >= 2:
-            # Last token is always the 2-letter code; everything before is the name.
-            countries.append(Country(code=parts[-1], name=" ".join(parts[:-1])))
+        try:
+            name, code = stripped.rsplit(maxsplit=1)
+        except ValueError:
+            continue
+        countries.append(Country(code=code, name=name.rstrip()))
     return countries
 
 
@@ -57,12 +59,18 @@ def parse_cities(stdout: str, country_code: str) -> list[City]:
         if not stripped:
             continue
         parts = _COL_SEP.split(stripped)
-        name = parts[0]
+        name = stripped
         features: frozenset[CityFeature] = frozenset()
-        if len(parts) >= 2:
-            features = _parse_features(parts[1])
+        if len(parts) >= 2 and _is_feature_column(parts[-1]):
+            name = stripped[: -len(parts[-1])].rstrip()
+            features = _parse_features(parts[-1])
         cities.append(City(name=name, country_code=country_code, features=features))
     return cities
+
+
+def _is_feature_column(features_str: str) -> bool:
+    tokens = [token.strip() for token in features_str.split(",")]
+    return bool(tokens) and all(token in _KNOWN_FEATURE_VALUES for token in tokens)
 
 
 def _parse_features(features_str: str) -> frozenset[CityFeature]:

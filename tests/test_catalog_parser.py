@@ -39,6 +39,13 @@ def test_parse_countries_multi_word_name():
     assert by_code["US"].name == "United States"
 
 
+def test_parse_countries_preserves_column_delimiter_inside_name():
+    result = parse_countries("Country  Code\n---  ----\nFoo  Bar  FB\n")
+
+    assert result[0].code == "FB"
+    assert result[0].name == "Foo  Bar"
+
+
 def test_parse_countries_empty_stdout():
     assert parse_countries(COUNTRIES_EMPTY) == []
 
@@ -158,9 +165,22 @@ Alpha   P2P, Quantum
 """
     result = parse_cities(txt, "TL")
     assert len(result) == 1
-    assert CityFeature.P2P in result[0].features
-    # "Quantum" is unknown and should be silently ignored
-    assert len(result[0].features) == 1
+    assert result[0].name == "Alpha   P2P, Quantum"
+    assert result[0].features == frozenset()
+
+
+def test_parse_cities_preserves_column_delimiter_unless_features_are_exact():
+    result = parse_cities("Cities in Testland:\nCity  Features\n---  ----\nFoo  Bar  TOR\n", "TL")
+
+    assert result[0].name == "Foo  Bar  TOR"
+    assert result[0].features == frozenset()
+
+
+def test_parse_cities_still_parses_well_formed_feature_row():
+    result = parse_cities("Cities in Testland:\nCity  Features\n---  ----\nFoo  Bar  Tor\n", "TL")
+
+    assert result[0].name == "Foo  Bar"
+    assert result[0].features == frozenset({CityFeature.TOR})
 
 
 def test_parse_cities_truncated_mid_row():
