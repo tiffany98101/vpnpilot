@@ -48,6 +48,47 @@ def test_parse_active_vpn_profile_detection():
     assert vpn.device == "tun0"
 
 
+@pytest.mark.parametrize(
+    ("text", "active", "expected"),
+    [
+        (
+            r"Work\:VPN:111:vpn:tun0",
+            True,
+            ("Work:VPN", "111", "vpn", "tun0"),
+        ),
+        (
+            r"Foo\\Bar:222:vpn:tun0",
+            True,
+            (r"Foo\Bar", "222", "vpn", "tun0"),
+        ),
+        (
+            "Plain:333:vpn:tun0",
+            True,
+            ("Plain", "333", "vpn", "tun0"),
+        ),
+        (
+            "No device:444:vpn:",
+            True,
+            ("No device", "444", "vpn", None),
+        ),
+        (
+            r"EndsWithBackslash\\:555:vpn:tun0",
+            True,
+            ("EndsWithBackslash\\", "555", "vpn", "tun0"),
+        ),
+        (
+            r"Work\:VPN:111:vpn",
+            False,
+            ("Work:VPN", "111", "vpn", None),
+        ),
+    ],
+)
+def test_parse_nmcli_connections_unescapes_terse_fields(text, active, expected):
+    conn = parse_nmcli_connections(text, active=active)[0]
+
+    assert (conn.name, conn.uuid, conn.type, conn.device) == expected
+
+
 def test_parse_inactive_profile_listing_and_proton_detection():
     profiles = parse_nmcli_connections(PROFILES, active=False)
     assert find_profile(profiles, "us-dc-281.protonvpn.tcp") is not None

@@ -57,7 +57,7 @@ def parse_nmcli_connections(text: str, *, active: bool) -> list[NMConnection]:
     for raw in text.splitlines():
         if not raw.strip():
             continue
-        parts = raw.rstrip("\n").split(":")
+        parts = _split_nmcli_terse(raw.rstrip("\n"))
         if active:
             if len(parts) < 4:
                 continue
@@ -71,6 +71,31 @@ def parse_nmcli_connections(text: str, *, active: bool) -> list[NMConnection]:
             name, uuid, type_ = parts[:3]
             connections.append(NMConnection(name=name, uuid=uuid, type=type_))
     return connections
+
+
+def _split_nmcli_terse(line: str) -> list[str]:
+    fields: list[str] = []
+    buf: list[str] = []
+    i = 0
+    while i < len(line):
+        char = line[i]
+        if char == "\\":
+            if i + 1 < len(line) and line[i + 1] in {":", "\\"}:
+                buf.append(line[i + 1])
+                i += 2
+                continue
+            buf.append(char)
+            i += 1
+            continue
+        if char == ":":
+            fields.append("".join(buf))
+            buf = []
+            i += 1
+            continue
+        buf.append(char)
+        i += 1
+    fields.append("".join(buf))
+    return fields
 
 
 def active_vpn(connections: list[NMConnection]) -> NMConnection | None:
