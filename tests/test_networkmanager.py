@@ -23,10 +23,21 @@ us-dc-281.protonvpn.tcp:uuid-1:vpn:tun0
 br0:uuid-2:bridge:br0
 """
 
+ACTIVE_UNRELATED = """\
+Corp VPN:uuid-corp:vpn:tun1
+"""
+
+ACTIVE_BOTH = """\
+Corp VPN:uuid-corp:vpn:tun1
+us-dc-281.protonvpn.tcp:uuid-1:vpn:tun0
+"""
+
 PROFILES = """\
 us-dc-281.protonvpn.tcp:uuid-1:vpn
 Home:uuid-2:802-3-ethernet
 """
+
+PROFILES_WITH_UNRELATED = PROFILES + "Corp VPN:uuid-corp:vpn\n"
 
 
 def test_parse_active_vpn_profile_detection():
@@ -103,11 +114,15 @@ async def test_disconnect_uses_active_vpn_profile_when_unconfigured(monkeypatch)
     async def fake_active_connections():
         return parse_nmcli_connections(ACTIVE, active=True), None
 
+    async def fake_list_profiles():
+        return parse_nmcli_connections(PROFILES, active=False), None
+
     async def fake_run_nmcli(*args, timeout=None):
         calls.append(args)
         return CLIResult(0, "", "")
 
     monkeypatch.setattr(nm, "active_connections", fake_active_connections)
+    monkeypatch.setattr(nm, "list_profiles", fake_list_profiles)
     monkeypatch.setattr(nm, "_run_nmcli", fake_run_nmcli)
 
     result = await nm.disconnect()
@@ -121,6 +136,9 @@ async def test_status_prefers_tun_default_route_over_nm_parent_device(monkeypatc
 
     async def fake_active_connections():
         return parse_nmcli_connections(ACTIVE, active=True), None
+
+    async def fake_list_profiles():
+        return parse_nmcli_connections(PROFILES, active=False), None
 
     async def fake_run_command(argv, *, timeout):
         if argv == ["ip", "-br", "addr"]:
@@ -139,6 +157,7 @@ async def test_status_prefers_tun_default_route_over_nm_parent_device(monkeypatc
         return CLIResult(0, "", "")
 
     monkeypatch.setattr(nm, "active_connections", fake_active_connections)
+    monkeypatch.setattr(nm, "list_profiles", fake_list_profiles)
     monkeypatch.setattr(nm, "_run_command", fake_run_command)
 
     info = await nm.detect()
@@ -146,6 +165,53 @@ async def test_status_prefers_tun_default_route_over_nm_parent_device(monkeypatc
     assert info.interface == "tun0"
     assert info.default_route_device == "tun0"
     assert info.dns_summary == "tun0: 10.98.0.1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("active_text", "expected_state", "expected_disconnect"),
+    [
+        (ACTIVE, ConnState.CONNECTED, [("connection", "down", "us-dc-281.protonvpn.tcp")]),
+        (ACTIVE_UNRELATED, ConnState.EXTERNAL_VPN_ACTIVE, []),
+        (ACTIVE_BOTH, ConnState.CONNECTED, [("connection", "down", "us-dc-281.protonvpn.tcp")]),
+        ("", ConnState.DISCONNECTED, []),
+    ],
+)
+async def test_networkmanager_detect_and_disconnect_uses_owned_profiles_only(
+    monkeypatch,
+    active_text,
+    expected_state,
+    expected_disconnect,
+):
+    nm = NetworkManagerOpenVPN()
+    calls = []
+
+    async def fake_active_connections():
+        return parse_nmcli_connections(active_text, active=True), None
+
+    async def fake_list_profiles():
+        return parse_nmcli_connections(PROFILES_WITH_UNRELATED, active=False), None
+
+    async def fake_run_command(_argv, *, timeout):
+        return CLIResult(0, "", "")
+
+    async def fake_run_nmcli(*args, timeout=None):
+        calls.append(args)
+        return CLIResult(0, "", "")
+
+    monkeypatch.setattr(nm, "active_connections", fake_active_connections)
+    monkeypatch.setattr(nm, "list_profiles", fake_list_profiles)
+    monkeypatch.setattr(nm, "_run_command", fake_run_command)
+    monkeypatch.setattr(nm, "_run_nmcli", fake_run_nmcli)
+
+    info = await nm.detect()
+    assert info.state is expected_state
+
+    result = await nm.disconnect()
+    assert result.ok
+    assert calls == expected_disconnect
+    if not expected_disconnect:
+        assert "No owned" in result.stdout
 
 
 @pytest.mark.asyncio
@@ -194,6 +260,9 @@ async def test_auto_backend_prefers_active_nm_vpn(monkeypatch):
     async def fake_active_connections():
         return parse_nmcli_connections(ACTIVE, active=True), None
 
+    async def fake_owned_profiles_exist():
+        return True
+
     async def fake_detect():
         return ConnectionInfo(
             state=ConnState.CONNECTED,
@@ -202,6 +271,7 @@ async def test_auto_backend_prefers_active_nm_vpn(monkeypatch):
         )
 
     monkeypatch.setattr(nm, "active_connections", fake_active_connections)
+    monkeypatch.setattr(nm, "owned_profiles_exist", fake_owned_profiles_exist)
     monkeypatch.setattr(nm, "detect", fake_detect)
 
     info = await backend.detect()
@@ -222,7 +292,11 @@ async def test_auto_backend_falls_back_to_proton_cli_without_nm_profile(monkeypa
     async def fake_active_connections():
         return [], None
 
+    async def fake_owned_profiles_exist():
+        return False
+
     monkeypatch.setattr(nm, "active_connections", fake_active_connections)
+    monkeypatch.setattr(nm, "owned_profiles_exist", fake_owned_profiles_exist)
 
     result = await backend.connect(country="US")
     assert result.ok

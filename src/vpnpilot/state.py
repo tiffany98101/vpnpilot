@@ -18,6 +18,7 @@ class ConnState(Enum):
     CLI_MISSING = "cli_missing"
     CLI_ERROR = "cli_error"
     NETWORK_OFFLINE = "network_offline"
+    EXTERNAL_VPN_ACTIVE = "external_vpn_active"
     UNKNOWN = "unknown"
 
 

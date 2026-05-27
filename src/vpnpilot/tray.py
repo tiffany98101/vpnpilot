@@ -432,6 +432,13 @@ class TrayApp:
                 self._render_backend_line(info)
                 self._disconnect_action.setEnabled(False)
                 self._tray.setToolTip("vpnpilot — network offline")
+            case ConnState.EXTERNAL_VPN_ACTIVE:
+                self._tray.setIcon(_icon("icon-disconnected.svg"))
+                self._status_action.setText("Status: external VPN active")
+                self._server_action.setVisible(False)
+                self._render_backend_line(info)
+                self._disconnect_action.setEnabled(False)
+                self._tray.setToolTip("vpnpilot — external VPN active")
             case ConnState.UNKNOWN:
                 self._tray.setIcon(_icon("icon-disconnected.svg"))
                 self._status_action.setText("Status: unknown")

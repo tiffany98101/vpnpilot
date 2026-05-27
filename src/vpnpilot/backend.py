@@ -72,10 +72,8 @@ class AutoBackend:
         return await selected.disconnect()
 
     async def _selected_for_status(self) -> VPNBackend:
-        if self._settings.prefer_active_nm_vpn:
-            active, error = await self._nm.active_connections()
-            if error is None and any(conn.is_vpn for conn in active):
-                return self._nm
+        if await self._nm.owned_profiles_exist():
+            return self._nm
         if self._nm.profile_name and await self._nm.configured_profile_exists():
             return self._nm
         return self._proton
@@ -83,10 +81,8 @@ class AutoBackend:
     async def _selected_for_command(self) -> VPNBackend:
         if self._nm.profile_name and await self._nm.configured_profile_exists():
             return self._nm
-        if self._settings.prefer_active_nm_vpn:
-            active, error = await self._nm.active_connections()
-            if error is None and any(conn.is_vpn for conn in active):
-                return self._nm
+        if await self._nm.owned_profiles_exist():
+            return self._nm
         return self._proton
 
 

@@ -47,6 +47,11 @@ def looks_like_proton_profile(name: str) -> bool:
     )
 
 
+def is_owned_imported_profile_name(name: str) -> bool:
+    lowered = name.casefold()
+    return lowered.endswith(".protonvpn.tcp") or lowered.endswith(".protonvpn.udp")
+
+
 def parse_nmcli_connections(text: str, *, active: bool) -> list[NMConnection]:
     connections: list[NMConnection] = []
     for raw in text.splitlines():
@@ -84,6 +89,25 @@ def find_profile(connections: list[NMConnection], name: str) -> NMConnection | N
 
 def proton_like_profiles(connections: list[NMConnection]) -> list[NMConnection]:
     return [conn for conn in connections if conn.is_vpn and conn.is_proton_like]
+
+
+def owned_imported_profiles(connections: list[NMConnection]) -> list[NMConnection]:
+    return [conn for conn in connections if conn.is_vpn and is_owned_imported_profile_name(conn.name)]
+
+
+def owned_vpn(
+    connections: list[NMConnection],
+    *,
+    configured_profile: NMConnection | None = None,
+) -> NMConnection | None:
+    for conn in connections:
+        if not conn.is_vpn:
+            continue
+        if configured_profile is not None and conn.uuid == configured_profile.uuid:
+            return conn
+        if is_owned_imported_profile_name(conn.name):
+            return conn
+    return None
 
 
 def default_route_device(route_output: str) -> str | None:
@@ -185,11 +209,24 @@ class NetworkManagerOpenVPN:
         profiles, error = await self.list_profiles()
         return error is None and find_profile(profiles, self.profile_name) is not None
 
+    async def owned_profiles_exist(self) -> bool:
+        profiles, error = await self.list_profiles()
+        if error is not None:
+            return False
+        if self.profile_name and find_profile(profiles, self.profile_name) is not None:
+            return True
+        return bool(owned_imported_profiles(profiles))
+
     async def detect(self) -> ConnectionInfo:
         active, active_error = await self.active_connections()
         if active_error is not None:
             return _error_info(active_error, "nmcli active connection lookup failed")
-        active_conn = active_vpn(active)
+        profiles, profile_error = await self.list_profiles()
+        if profile_error is not None:
+            return _error_info(profile_error, "nmcli profile lookup failed")
+        configured = find_profile(profiles, self.profile_name) if self.profile_name else None
+        active_conn = owned_vpn(active, configured_profile=configured)
+        external_conn = active_vpn(active)
         addr_result = await self._run_command([self._ip, "-br", "addr"], timeout=5.0)
         route_result = await self._run_command([self._ip, "route"], timeout=5.0)
         default_dev = default_route_device(route_result.stdout) if route_result.ok else None
@@ -223,9 +260,18 @@ class NetworkManagerOpenVPN:
                 backend_reason="active NetworkManager VPN profile",
             )
 
-        profiles, profile_error = await self.list_profiles()
-        if profile_error is not None:
-            return _error_info(profile_error, "nmcli profile lookup failed")
+        if external_conn is not None:
+            return ConnectionInfo(
+                state=ConnState.EXTERNAL_VPN_ACTIVE,
+                auth=AuthState.UNKNOWN,
+                server=external_conn.name,
+                protocol=external_conn.type,
+                interface=external_conn.device,
+                backend=NM_BACKEND_NAME,
+                active_profile=external_conn.name,
+                default_route_device=default_dev,
+                backend_reason="external NetworkManager VPN active",
+            )
         if self.profile_name and find_profile(profiles, self.profile_name) is None:
             return ConnectionInfo(
                 state=ConnState.CLI_ERROR,
@@ -248,7 +294,7 @@ class NetworkManagerOpenVPN:
             profiles, error = await self.list_profiles()
             if error is not None:
                 return error
-            proton_profiles = proton_like_profiles(profiles)
+            proton_profiles = owned_imported_profiles(profiles)
             if not proton_profiles:
                 return CLIResult(
                     returncode=2,
@@ -260,14 +306,21 @@ class NetworkManagerOpenVPN:
 
     async def disconnect(self) -> CLIResult:
         profile = self.profile_name
-        if not profile:
-            active, error = await self.active_connections()
-            if error is not None:
-                return error
-            vpn = active_vpn(active)
-            if vpn is None:
-                return CLIResult(returncode=0, stdout="", stderr="")
-            profile = vpn.name
+        active, error = await self.active_connections()
+        if error is not None:
+            return error
+        profiles, profile_error = await self.list_profiles()
+        if profile_error is not None:
+            return profile_error
+        configured = find_profile(profiles, profile) if profile else None
+        vpn = owned_vpn(active, configured_profile=configured)
+        if vpn is None:
+            return CLIResult(
+                returncode=0,
+                stdout="No owned NetworkManager VPN is active.",
+                stderr="",
+            )
+        profile = configured.name if configured is not None else vpn.name
         return await self._run_nmcli("connection", "down", profile, timeout=self._timeout)
 
     async def _run_nmcli(self, *args: str, timeout: float | None = None) -> CLIResult:
