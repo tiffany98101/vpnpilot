@@ -154,7 +154,7 @@ def missing_cli_message() -> str:
 
 _STATUS_LINE = re.compile(r"^Status:\s*(.+?)\s*$", re.MULTILINE)
 _SERVER_LINE = re.compile(
-    r"^Server:\s*(?P<server>\S+)\s+in\s+(?P<city>.+?),\s*(?P<country>.+?)\s*$",
+    r"^Server:\s*(?P<server>\S+)\s+in\s+(?P<city>.+),\s*(?P<country>[^,]+?)\s*$",
     re.MULTILINE,
 )
 _LOAD_LINE = re.compile(r"^Load:\s*(\d+)%", re.MULTILINE)

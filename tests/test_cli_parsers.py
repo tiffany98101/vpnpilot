@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from vpnpilot.cli import (
     CLIResult,
     is_auth_error,
@@ -37,6 +39,23 @@ def test_parse_status_connected():
     assert info.country == "United States"
     assert info.load_percent == 32
     assert info.protocol == "wireguard"
+
+
+@pytest.mark.parametrize(
+    ("city", "country"),
+    [
+        ("Washington, D.C.", "United States"),
+        ("Hong Kong", "Hong Kong"),
+        ("São Paulo", "Brazil"),
+        ("Frankfurt am Main", "Germany"),
+    ],
+)
+def test_parse_status_city_names(city, country):
+    info = parse_status(f"Status: Connected\nServer: us-free#1 in {city}, {country}\n")
+
+    assert info.state is ConnState.CONNECTED
+    assert info.city == city
+    assert info.country == country
 
 
 def test_parse_status_disconnected():
