@@ -134,7 +134,12 @@ def test_github_actions_rpm_workflow_builds_and_publishes():
     assert "fedora:latest" in text
     assert "pytest -q" in text
     assert "./scripts/build-rpm.sh" in text
-    assert "actions/upload-artifact" in text
+    assert "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4" in text
+    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4" in text
+    assert "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4" in text
+    assert "softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2" in text
+    assert "needs: rpm" in text
+    assert "contents: write" in text
     assert "vpnpilot-rpms" in text
     assert "softprops/action-gh-release" in text
     assert "refs/tags/v" in text
