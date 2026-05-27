@@ -9,7 +9,7 @@ description = "Unofficial tray UI for the ProtonVPN CLI on Linux"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
-authors = [{ name = "Tiffany von Arnim", email = "tiffany.vonarnim@gmail.com" }]
+authors = [{ name = "Tiffany Von Arnim", email = "tiffany.vonarnim@gmail.com" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: X11 Applications :: Qt",
