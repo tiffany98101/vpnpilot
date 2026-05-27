@@ -201,10 +201,25 @@ class CLIStatusDetector(Detector):
 class NetworkStatusDetector(Detector):
     """Best-effort offline probe via the system routing table."""
 
-    def __init__(self, *, ip_bin: str = "ip") -> None:
+    def __init__(self, *, ip_bin: str = "ip", nmcli_bin: str = "nmcli") -> None:
         self._ip = ip_bin
+        self._nmcli = nmcli_bin
 
     async def detect(self) -> ConnectionInfo:
+        connectivity = await self._nm_connectivity()
+        if connectivity == "portal":
+            return ConnectionInfo(
+                state=ConnState.CAPTIVE_PORTAL,
+                error="NetworkManager reports captive portal connectivity",
+            )
+        if connectivity == "limited":
+            return ConnectionInfo(
+                state=ConnState.NETWORK_LIMITED,
+                error="NetworkManager reports limited connectivity",
+            )
+        if connectivity == "none":
+            return ConnectionInfo(state=ConnState.NETWORK_OFFLINE)
+
         result = await _run_command([self._ip, "route"], timeout=3.0)
         if result.returncode == 127:
             return ConnectionInfo(state=ConnState.UNKNOWN, error=result.stderr)
@@ -221,6 +236,16 @@ class NetworkStatusDetector(Detector):
         if not has_default_route:
             return ConnectionInfo(state=ConnState.NETWORK_OFFLINE)
         return ConnectionInfo(state=ConnState.DISCONNECTED)
+
+    async def _nm_connectivity(self) -> str | None:
+        result = await _run_command(
+            [self._nmcli, "-t", "-f", "CONNECTIVITY", "general"],
+            timeout=3.0,
+        )
+        if not result.ok:
+            return None
+        value = result.stdout.strip().splitlines()[0].strip().casefold() if result.stdout.strip() else ""
+        return value or None
 
 
 # -------- 3) Auth detector (orthogonal axis) --------------------------
@@ -270,9 +295,13 @@ class CompositeDetector(Detector):
             status_task = asyncio.create_task(self._cli_status.detect())
             network_info = await self._network.detect()
             status_info = await status_task
-            if network_info.state is ConnState.NETWORK_OFFLINE:
+            if network_info.state in {
+                ConnState.NETWORK_OFFLINE,
+                ConnState.CAPTIVE_PORTAL,
+                ConnState.NETWORK_LIMITED,
+            }:
                 return ConnectionInfo(
-                    state=ConnState.NETWORK_OFFLINE,
+                    state=network_info.state,
                     auth=auth_state,
                     account_email=email,
                     error=network_info.error,

@@ -442,6 +442,35 @@ async def test_connect_preset_blocked_when_signed_out(qapp, tmp_path):
     assert errors and "sign in" in errors[0].lower()
 
 
+@pytest.mark.parametrize(
+    "state, expected_error",
+    [
+        (ConnState.CAPTIVE_PORTAL, "captive portal"),
+        (ConnState.NETWORK_LIMITED, "limited"),
+        (ConnState.NETWORK_OFFLINE, "offline"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_connect_preset_blocked_when_network_unavailable(qapp, tmp_path, state, expected_error):
+    cli = ScriptedCLI(
+        connect_result=CLIResult(0, "", ""),
+        disconnect_result=CLIResult(0, "", ""),
+    )
+    detector = ScriptedDetector(answers=[ConnectionInfo(state=state, auth=AuthState.SIGNED_IN)])
+    store = PresetStore(path=tmp_path / "presets.json")
+    presets = store.load()
+    ctrl = Controller(cli, detector, preset_store=store)
+    errors: list[str] = []
+    ctrl.error_occurred.connect(errors.append)
+
+    await ctrl._refresh_state()
+
+    ctrl.connect_preset(presets[0].id)
+    await asyncio.sleep(0.02)
+    assert cli.connect_calls == []
+    assert errors and expected_error in errors[0].lower()
+
+
 @pytest.mark.asyncio
 async def test_connect_preset_missing_id_emits_error(qapp, tmp_path):
     cli = ScriptedCLI(

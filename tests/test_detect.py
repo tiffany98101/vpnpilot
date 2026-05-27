@@ -189,13 +189,62 @@ async def test_composite_reports_network_offline_before_cli_missing(tmp_path):
 
 @pytest.mark.asyncio
 async def test_network_status_detector_offline_when_no_default_route(monkeypatch):
-    async def fake_run(_argv, *, timeout):
+    async def fake_run(argv, *, timeout):
+        if argv[0] == "nmcli":
+            return CLIResult(returncode=127, stdout="", stderr="nmcli: not found")
         return CLIResult(returncode=0, stdout="10.0.0.0/24 dev eth0\n", stderr="")
 
     monkeypatch.setattr("vpnpilot.detect._run_command", fake_run)
     det = NetworkStatusDetector()
     info = await det.detect()
     assert info.state is ConnState.NETWORK_OFFLINE
+
+
+@pytest.mark.parametrize(
+    "connectivity, expected_state",
+    [
+        ("portal", ConnState.CAPTIVE_PORTAL),
+        ("limited", ConnState.NETWORK_LIMITED),
+        ("none", ConnState.NETWORK_OFFLINE),
+    ],
+)
+@pytest.mark.asyncio
+async def test_network_status_detector_reports_nm_connectivity(monkeypatch, connectivity, expected_state):
+    calls: list[list[str]] = []
+
+    async def fake_run(argv, *, timeout):
+        calls.append(argv)
+        if argv[0] == "nmcli":
+            return CLIResult(returncode=0, stdout=f"{connectivity}\n", stderr="")
+        return CLIResult(returncode=0, stdout="default via 10.0.0.1 dev wlan0\n", stderr="")
+
+    monkeypatch.setattr("vpnpilot.detect._run_command", fake_run)
+    det = NetworkStatusDetector()
+    info = await det.detect()
+
+    assert info.state is expected_state
+    assert calls == [["nmcli", "-t", "-f", "CONNECTIVITY", "general"]]
+
+
+@pytest.mark.asyncio
+async def test_network_status_detector_full_connectivity_uses_route_table(monkeypatch):
+    calls: list[list[str]] = []
+
+    async def fake_run(argv, *, timeout):
+        calls.append(argv)
+        if argv[0] == "nmcli":
+            return CLIResult(returncode=0, stdout="full\n", stderr="")
+        return CLIResult(returncode=0, stdout="default via 10.0.0.1 dev wlan0\n", stderr="")
+
+    monkeypatch.setattr("vpnpilot.detect._run_command", fake_run)
+    det = NetworkStatusDetector()
+    info = await det.detect()
+
+    assert info.state is ConnState.DISCONNECTED
+    assert calls == [
+        ["nmcli", "-t", "-f", "CONNECTIVITY", "general"],
+        ["ip", "route"],
+    ]
 
 
 @pytest.mark.asyncio

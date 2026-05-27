@@ -111,6 +111,8 @@ class Controller(QObject):
         if self._requires_auth_gate() and self._current.auth is AuthState.SIGNED_OUT:
             self._emit_error("Sign in to ProtonVPN first.")
             return
+        if self._network_unavailable_gate():
+            return
         if self._preset_store is None:
             self._emit_error("No presets configured.")
             return
@@ -129,6 +131,8 @@ class Controller(QObject):
         if self._requires_auth_gate() and self._current.auth is AuthState.SIGNED_OUT:
             self._emit_error("Sign in to ProtonVPN first.")
             return
+        if self._network_unavailable_gate():
+            return
         if city:
             self._spawn(self._do_connect(city=city))
         else:
@@ -144,6 +148,8 @@ class Controller(QObject):
         """
         if self._requires_auth_gate() and self._current.auth is AuthState.SIGNED_OUT:
             self._emit_error("Sign in to ProtonVPN first.")
+            return
+        if self._network_unavailable_gate():
             return
         normalized = server_id.strip().upper()
         if not _SERVER_ID_RE.match(normalized):
@@ -203,6 +209,18 @@ class Controller(QObject):
 
     def _requires_auth_gate(self) -> bool:
         return self._current.backend != NM_BACKEND_NAME
+
+    def _network_unavailable_gate(self) -> bool:
+        messages = {
+            ConnState.CAPTIVE_PORTAL: "Authenticate with the captive portal, then refresh VPNPilot.",
+            ConnState.NETWORK_LIMITED: "Network connectivity is limited; reconnect, then refresh VPNPilot.",
+            ConnState.NETWORK_OFFLINE: "Network is offline; reconnect, then refresh VPNPilot.",
+        }
+        message = messages.get(self._current.state)
+        if message is None:
+            return False
+        self._emit_error(message)
+        return True
 
     async def _do_connect(self, **kwargs) -> None:
         log.info("connect requested: %s", _summarize_connect_kwargs(kwargs))

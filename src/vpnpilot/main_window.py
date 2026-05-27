@@ -58,6 +58,8 @@ _STATE_TEXT = {
     ConnState.CLI_MISSING: "CLI not found",
     ConnState.CLI_ERROR: "CLI error",
     ConnState.NETWORK_OFFLINE: "Network offline",
+    ConnState.CAPTIVE_PORTAL: "Captive portal",
+    ConnState.NETWORK_LIMITED: "Network limited",
     ConnState.EXTERNAL_VPN_ACTIVE: "External VPN active",
     ConnState.UNKNOWN: "Unknown",
 }
@@ -71,6 +73,8 @@ _STATE_STYLE = {
     ConnState.CLI_MISSING: "color: #a33; font-size: 18pt; font-weight: 600;",
     ConnState.CLI_ERROR: "color: #a33; font-size: 18pt; font-weight: 600;",
     ConnState.NETWORK_OFFLINE: "color: #888; font-size: 18pt; font-weight: 600;",
+    ConnState.CAPTIVE_PORTAL: "color: #c98a00; font-size: 18pt; font-weight: 600;",
+    ConnState.NETWORK_LIMITED: "color: #c98a00; font-size: 18pt; font-weight: 600;",
     ConnState.EXTERNAL_VPN_ACTIVE: "color: #c98a00; font-size: 18pt; font-weight: 600;",
     ConnState.UNKNOWN: "color: #888; font-size: 18pt; font-weight: 600;",
 }

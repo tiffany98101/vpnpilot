@@ -43,6 +43,20 @@ def test_help_for_network_offline():
     assert "Wi-Fi" in " ".join(item.actions)
 
 
+def test_help_for_captive_portal():
+    item = _help(ConnectionInfo(state=ConnState.CAPTIVE_PORTAL))
+
+    assert item.title == "Captive portal detected"
+    assert "portal" in item.message.lower()
+
+
+def test_help_for_limited_network():
+    item = _help(ConnectionInfo(state=ConnState.NETWORK_LIMITED))
+
+    assert item.title == "Limited network connectivity"
+    assert "limited" in item.message.lower()
+
+
 def test_help_for_command_timeout():
     item = _help(ConnectionInfo(state=ConnState.CLI_ERROR), last_error="status timed out after 10s")
 

@@ -463,6 +463,20 @@ class TrayApp:
                 self._render_backend_line(info)
                 self._disconnect_action.setEnabled(False)
                 self._tray.setToolTip("vpnpilot — network offline")
+            case ConnState.CAPTIVE_PORTAL:
+                self._tray.setIcon(_icon("icon-disconnected.svg"))
+                self._status_action.setText("Status: captive portal")
+                self._server_action.setVisible(False)
+                self._render_backend_line(info)
+                self._disconnect_action.setEnabled(False)
+                self._tray.setToolTip("vpnpilot — captive portal")
+            case ConnState.NETWORK_LIMITED:
+                self._tray.setIcon(_icon("icon-disconnected.svg"))
+                self._status_action.setText("Status: network limited")
+                self._server_action.setVisible(False)
+                self._render_backend_line(info)
+                self._disconnect_action.setEnabled(False)
+                self._tray.setToolTip("vpnpilot — network limited")
             case ConnState.EXTERNAL_VPN_ACTIVE:
                 self._tray.setIcon(_icon("icon-disconnected.svg"))
                 self._status_action.setText("Status: external VPN active")

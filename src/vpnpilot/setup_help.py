@@ -77,6 +77,28 @@ def help_for_status(
             detail=safe_error,
         )
 
+    if info.state is ConnState.CAPTIVE_PORTAL:
+        return HelpItem(
+            title="Captive portal detected",
+            message=(
+                "NetworkManager reports captive portal connectivity, so Proton VPN cannot "
+                "reach the public internet yet."
+            ),
+            actions=("Open a browser and sign in to the Wi-Fi portal.", "Then refresh VPNPilot."),
+            detail=safe_error,
+        )
+
+    if info.state is ConnState.NETWORK_LIMITED:
+        return HelpItem(
+            title="Limited network connectivity",
+            message=(
+                "NetworkManager reports limited connectivity, so Proton VPN commands may fail "
+                "until the network is fully online."
+            ),
+            actions=("Reconnect to Wi-Fi or Ethernet, then refresh VPNPilot.",),
+            detail=safe_error,
+        )
+
     if info.state is ConnState.CLI_ERROR:
         return HelpItem(
             title="Proton VPN CLI error",
