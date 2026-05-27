@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import logging
 import os
 import platform
@@ -24,6 +25,17 @@ _SENSITIVE_LINE_RE = re.compile(
     r"(?i)\b(password|passwd|pwd|token|auth|bearer|api[_-]?key|private[_-]?key|secret)\b"
 )
 _BEARER_RE = re.compile(r"(?i)\bbearer\s+[a-z0-9._~+/=-]{12,}")
+_AUTH_BASIC_RE = re.compile(r"(?i)\b(Authorization:\s*Basic\s+)\S+")
+_AUTH_BEARER_RE = re.compile(r"(?i)\b(Authorization:\s*Bearer\s+)\S+")
+_SET_COOKIE_RE = re.compile(r"(?i)\b(Set-Cookie:\s*[^=;\s]+)=([^;\s]*)")
+_COOKIE_PAIR_RE = re.compile(r"([^=;\s]+)=([^;\s]+)")
+_ACCESS_TOKEN_RE = re.compile(
+    r"(?i)\b(access_token)(\s+|=)([^\s,;]+)|(\"access_token\"\s*:\s*\")([^\"]+)(\")"
+)
+_JWT_RE = re.compile(r"\b[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b")
+_MAC_RE = re.compile(r"\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}\b")
+_IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_HOME_PATH_RE = re.compile(r"(?P<prefix>/home/|/Users/)(?P<user>[^/\s]+)(?=/)")
 _ASSIGNMENT_RE = re.compile(
     r"(?i)\b([a-z0-9_.-]*(?:token|password|passwd|pwd|api[_-]?key|secret|private[_-]?key)"
     r"[a-z0-9_.-]*\s*[:=]\s*)\S+"
@@ -70,14 +82,41 @@ def redact(text: str) -> str:
     """Redact obvious secrets while preserving useful command context."""
     redacted_lines: list[str] = []
     for line in text.splitlines():
+        line = _AUTH_BASIC_RE.sub(r"\1<redacted>", line)
+        line = _AUTH_BEARER_RE.sub(r"\1<redacted>", line)
+        line = _BEARER_RE.sub("Bearer <redacted>", line)
+        line = _SET_COOKIE_RE.sub(r"\1=<redacted>", line)
+        if re.match(r"(?i)^\s*Cookie:\s*", line):
+            head, sep, tail = line.partition(":")
+            tail = _COOKIE_PAIR_RE.sub(r"\1=<redacted>", tail)
+            line = head + sep + tail
+        line = _ACCESS_TOKEN_RE.sub(_redact_access_token, line)
+        line = _JWT_RE.sub("<redacted>", line)
+        line = _MAC_RE.sub("<redacted>", line)
+        line = _IPV4_RE.sub(_redact_public_ipv4, line)
+        line = _HOME_PATH_RE.sub(r"\g<prefix><user>", line)
         if _SENSITIVE_LINE_RE.search(line):
             line = _ASSIGNMENT_RE.sub(r"\1<redacted>", line)
-            line = _BEARER_RE.sub("Bearer <redacted>", line)
             if _SENSITIVE_LINE_RE.search(line) and "<redacted>" not in line:
                 line = re.sub(r"(?<=: ).+", "<redacted>", line)
         line = _LONG_TOKEN_RE.sub("<redacted>", line)
         redacted_lines.append(line)
     return "\n".join(redacted_lines)
+
+
+def _redact_access_token(match: re.Match[str]) -> str:
+    if match.group(1):
+        return f"{match.group(1)}{match.group(2)}<redacted>"
+    return f'{match.group(4)}<redacted>{match.group(6)}'
+
+
+def _redact_public_ipv4(match: re.Match[str]) -> str:
+    value = match.group(0)
+    try:
+        ip = ipaddress.ip_address(value)
+    except ValueError:
+        return value
+    return "<redacted-ip>" if ip.is_global else value
 
 
 async def _run_command(argv: list[str], *, timeout: float) -> CLIResult:
