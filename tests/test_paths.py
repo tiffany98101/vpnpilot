@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import stat
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -78,3 +80,23 @@ def test_configure_logging_retargets_when_xdg_state_home_changes(tmp_path, monke
     assert len(handlers) == 1
     assert isinstance(handlers[0], RotatingFileHandler)
     assert Path(handlers[0].baseFilename) == second / "vpnpilot" / "vpnpilot.log"
+
+
+def test_log_file_and_rotations_are_private(tmp_path, monkeypatch):
+    state_home = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state_home))
+
+    old_umask = os.umask(0)
+    try:
+        configure_logging(max_bytes=80, backup_count=1)
+        logger = logging.getLogger("vpnpilot.test.rotation")
+        for i in range(10):
+            logger.warning("rotation line %s with enough bytes to roll over", i)
+    finally:
+        os.umask(old_umask)
+
+    current = default_log_path()
+    rotated = current.with_name(current.name + ".1")
+    assert stat.S_IMODE(current.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(current.stat().st_mode) == 0o600
+    assert stat.S_IMODE(rotated.stat().st_mode) == 0o600
