@@ -11,18 +11,47 @@ from __future__ import annotations
 import fcntl
 import logging
 import os
+import stat
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 
-def _runtime_dir() -> Path:
+def _is_private_runtime_dir(path: Path) -> bool:
+    try:
+        st = path.stat()
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(st.st_mode)
+        and st.st_uid == os.getuid()
+        and stat.S_IMODE(st.st_mode) == 0o700
+    )
+
+
+def _runtime_dir() -> Path | None:
     raw = os.environ.get("XDG_RUNTIME_DIR", "")
-    if raw and Path(raw).is_dir():
-        return Path(raw)
-    # /tmp survives logouts which is undesirable, but it's better than
-    # refusing to launch on an exotic environment.
-    return Path("/tmp")
+    if raw:
+        path = Path(raw)
+        if _is_private_runtime_dir(path):
+            return path
+        log.warning("singleton: unusable XDG_RUNTIME_DIR: %s", path)
+
+    run_user = Path("/run/user") / str(os.getuid())
+    if _is_private_runtime_dir(run_user):
+        return run_user
+
+    tmp_user = Path("/tmp") / f"vpnpilot-{os.getuid()}"
+    try:
+        tmp_user.mkdir(mode=0o700, exist_ok=True)
+        os.chmod(tmp_user, 0o700)
+    except OSError as e:
+        log.warning("singleton: cannot create private runtime dir %s (%s)", tmp_user, e)
+        return None
+    if not _is_private_runtime_dir(tmp_user):
+        log.warning("singleton: refusing unsafe runtime dir: %s", tmp_user)
+        return None
+    return tmp_user
 
 
 class SingletonLock:
@@ -35,23 +64,40 @@ class SingletonLock:
     """
 
     def __init__(self, name: str = "vpnpilot.lock", *, dir: Path | None = None) -> None:
-        base = dir if dir is not None else _runtime_dir()
-        self._path = Path(base) / name
+        base = Path(dir) if dir is not None else _runtime_dir()
+        self._path = (base / name) if base is not None else None
         self._fd: int | None = None
 
     @property
     def path(self) -> Path:
+        if self._path is None:
+            raise RuntimeError("singleton runtime directory is unavailable")
         return self._path
 
     def acquire(self) -> bool:
+        if self._path is None:
+            return False
+        flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
         try:
-            self._fd = os.open(self._path, os.O_RDWR | os.O_CREAT, 0o600)
+            self._fd = os.open(self._path, flags, 0o600)
         except OSError as e:
-            # Failing to even open the lock file is unusual (permissions,
-            # readonly fs). Fail open — running twice is worse than not
-            # running at all.
-            log.warning("singleton: cannot open %s (%s); allowing launch", self._path, e)
-            return True
+            log.warning("singleton: cannot open %s (%s); refusing launch", self._path, e)
+            return False
+        try:
+            st = os.fstat(self._fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+                os.close(self._fd)
+                self._fd = None
+                log.warning("singleton: refusing unsafe lock file: %s", self._path)
+                return False
+            os.fchmod(self._fd, 0o600)
+        except OSError as e:
+            os.close(self._fd)
+            self._fd = None
+            log.warning("singleton: cannot verify %s (%s); refusing launch", self._path, e)
+            return False
         try:
             fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -67,6 +113,8 @@ class SingletonLock:
 
     def held_by_pid(self) -> int | None:
         """Best-effort read of the lock file for a 'pid X is holding it' diagnostic."""
+        if self._path is None:
+            return None
         try:
             raw = self._path.read_text().strip()
             return int(raw) if raw else None

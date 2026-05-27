@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import textwrap
+from types import SimpleNamespace
 
 from vpnpilot._singleton import SingletonLock
 
@@ -52,3 +53,39 @@ def test_lock_releases_when_holder_exits(tmp_path):
     # Now a new lock object in this process should be able to acquire it.
     lock = SingletonLock(dir=tmp_path)
     assert lock.acquire() is True
+
+
+def test_symlink_lock_path_is_refused(tmp_path):
+    target = tmp_path / "target"
+    target.write_text("do not truncate", encoding="utf-8")
+    (tmp_path / "vpnpilot.lock").symlink_to(target)
+
+    lock = SingletonLock(dir=tmp_path)
+
+    assert lock.acquire() is False
+    assert target.read_text(encoding="utf-8") == "do not truncate"
+
+
+def test_wrong_owner_lock_file_is_refused(tmp_path, monkeypatch):
+    path = tmp_path / "vpnpilot.lock"
+    path.write_text("", encoding="utf-8")
+    real_fstat = os.fstat
+
+    def fake_fstat(fd):
+        st = real_fstat(fd)
+        if os.path.samefile(f"/proc/self/fd/{fd}", path):
+            return SimpleNamespace(st_mode=st.st_mode, st_uid=os.getuid() + 1)
+        return st
+
+    monkeypatch.setattr(os, "fstat", fake_fstat)
+
+    assert SingletonLock(dir=tmp_path).acquire() is False
+
+
+def test_open_eacces_is_not_acquired(tmp_path, monkeypatch):
+    def fake_open(*_args, **_kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(os, "open", fake_open)
+
+    assert SingletonLock(dir=tmp_path).acquire() is False
