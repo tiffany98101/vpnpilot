@@ -63,6 +63,9 @@ def looks_like_proton_profile(name: str) -> bool:
 
 
 def is_owned_imported_profile_name(name: str) -> bool:
+    # NetworkManager's OpenVPN import keeps Proton profile filenames such as
+    # us-dc-281.protonvpn.tcp; if Proton changes that naming convention, users
+    # can still select a configured profile and ownership will match by UUID.
     lowered = name.casefold()
     return lowered.endswith(".protonvpn.tcp") or lowered.endswith(".protonvpn.udp")
 

@@ -17,12 +17,13 @@
 - Unrelated active NetworkManager VPNs use a new `external_vpn_active` state instead of `disconnected`, because the UI needs to distinguish outside protection from VPNPilot-controlled protection.
 - The log handler exposes test-only size knobs through `configure_logging()` rather than a separate private entrypoint, because rollover behavior has to be exercised through the real handler path.
 - Proton repository trust pins are populated for Fedora 44 only, because those were the values verified during this run; other Fedora versions now abort until their pins are explicitly added.
-- The Proton release RPM does not install a key under `/etc/pki/rpm-gpg/`, so the install helper verifies the `gpgkey` URL from the installed repo file before refreshing the repository.
+- The Proton release RPM does not install a key under `/etc/pki/rpm-gpg/`, so the install helper reads the installed repo file's `gpgkey` URL, downloads that key, and compares its fingerprint to the pinned Fedora-version constant before refreshing the repository.
 - Catalog city rows with unknown feature text are preserved as names instead of partially parsed, because provider-controlled delimiter text is ambiguous and the safer behavior is not to guess.
 
 ## Followups
 
 - `src/vpnpilot/diagnostics.py`: keyword-driven redaction remains unsound long-term; durable secret safety needs allowlist-driven logging and diagnostics output.
+- `scripts/install-protonvpn-cli-fedora.sh`: repository RPM SHA256 and GPG fingerprint pins currently cover Fedora 44 only; add pins for each supported Fedora release before using the helper there.
 - Original review note: the allowlist-driven logging/redaction refactor is intentionally not part of this run.
 - Original review note: operational/laptop-mobility axes are intentionally not part of this run and need a separate adversarial pass: suspend/resume, captive portal, link flap, IPv6-only links, and system clock jumps.
 
