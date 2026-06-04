@@ -28,6 +28,7 @@ Repository: https://github.com/tiffany98101/vpnpilot
 - Modeless main window with a connection status panel
 - Editable preset library
 - Country/city server browser backed by Proton VPN CLI catalog data
+- Sync Servers button that refreshes the shared Proton VPN server catalog without changing the active VPN connection
 - Optional NetworkManager OpenVPN backend for manually imported Proton profiles
 - Sign-in helper panel that copies `protonvpn signin <email>` and rechecks auth state
 - Troubleshooting/setup-help dialog with Copy Diagnostic Info and Open Log actions
@@ -94,6 +95,15 @@ sudo dnf install ~/rpmbuild/RPMS/noarch/vpnpilot-*.rpm
 ```
 
 The package is currently `noarch`; if that changes later, install from the matching architecture directory under `~/rpmbuild/RPMS/`.
+
+For a local review build from an uncommitted checkout, use the Makefile target:
+
+```sh
+make rpm
+sudo dnf install ./dist/vpnpilot-*.rpm
+```
+
+`make rpm` builds the source tarball from tracked files in the current working tree, so it can be used to validate a pull request before committing. It writes the installable RPM to `dist/` and uses `.rpmbuild/` as repo-local scratch space. The release helper `./scripts/build-rpm.sh` is still the CI/tag-build path and writes RPM/SRPM artifacts under `~/rpmbuild/`.
 
 To uninstall VPNPilot:
 
@@ -253,8 +263,9 @@ curl -4 https://ifconfig.me
 2. Use the tray icon to check VPN/auth state.
 3. Open the main window for details, presets, and the country/city browser.
 4. Create or edit presets for common locations.
-5. Use Connect/Disconnect from the tray or main UI.
-6. If something fails, open `Troubleshooting / Setup Help` from the tray.
+5. Use `Sync Servers` when you want to refresh the country/city catalog without connecting, disconnecting, or changing the active VPN.
+6. Use Connect/Disconnect from the tray or main UI.
+7. If something fails, open `Troubleshooting / Setup Help` from the tray.
 
 City targeting depends on Proton CLI `--city` behavior. VPNPilot stores country and city context in presets for clarity, but city connects are still best-effort unless you use an exact server ID.
 
@@ -273,6 +284,8 @@ Dump the Proton VPN CLI catalog data used by VPNPilot:
 ```sh
 vpnpilot catalog dump
 ```
+
+The main-window `Sync Servers` button refreshes the same in-memory catalog used by the Browse tab and preset editor. It does not run a VPN connect or disconnect command. If a refresh cannot start or the Proton VPN CLI cannot provide countries, the Browse tab re-enables its refresh controls and shows the failure hint.
 
 Check NetworkManager:
 

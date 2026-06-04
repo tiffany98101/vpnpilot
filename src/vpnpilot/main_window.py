@@ -470,6 +470,7 @@ class MainWindow(QMainWindow):
             self.browse_tab = BrowseTab(catalog, controller, parent=self)
             self.tab_widget.addTab(self.browse_tab, "Browse")
             self.tab_widget.currentChanged.connect(self._on_tab_changed)
+            catalog.catalog_changed.connect(self._on_catalog_changed)
         else:
             self.browse_tab = None
 
@@ -477,6 +478,14 @@ class MainWindow(QMainWindow):
 
         footer = QHBoxLayout()
         footer.addStretch(1)
+        self.sync_servers_btn = QPushButton("Sync Servers")
+        self.sync_servers_btn.setObjectName("syncServersButton")
+        self.sync_servers_btn.setToolTip(
+            "Refresh the server catalog without changing the VPN connection."
+        )
+        self.sync_servers_btn.setVisible(catalog is not None)
+        self.sync_servers_btn.clicked.connect(self._on_sync_servers)
+        footer.addWidget(self.sync_servers_btn)
         self.setup_help_btn = QPushButton("Troubleshooting…")
         self.setup_help_btn.setObjectName("setupHelpButton")
         self.setup_help_btn.clicked.connect(self._open_setup_help)
@@ -500,6 +509,10 @@ class MainWindow(QMainWindow):
         if self.browse_tab is not None and self.tab_widget.widget(index) is self.browse_tab:
             self.browse_tab.on_shown()
 
+    def _on_catalog_changed(self, country_code: str) -> None:
+        if country_code == "":
+            self._set_sync_servers_busy(False)
+
     def _on_state_changed(self, info: ConnectionInfo) -> None:
         self.status_panel.render(info)
         self.preset_panel.update_for_connection(info)
@@ -509,6 +522,25 @@ class MainWindow(QMainWindow):
 
     def _on_disconnect(self) -> None:
         self._controller.disconnect()
+
+    def _on_sync_servers(self) -> None:
+        if self._catalog is None:
+            return
+        self._set_sync_servers_busy(True)
+        if self.browse_tab is not None:
+            self.browse_tab.prepare_for_catalog_refresh("Syncing server list…")
+        self._catalog.refresh()
+        try:
+            self._catalog.prewarm()
+        except RuntimeError:
+            log.debug("could not schedule catalog prewarm", exc_info=True)
+            if self.browse_tab is not None:
+                self.browse_tab.finish_catalog_refresh("Server list sync could not start.")
+            self._set_sync_servers_busy(False)
+
+    def _set_sync_servers_busy(self, busy: bool) -> None:
+        self.sync_servers_btn.setEnabled(not busy)
+        self.sync_servers_btn.setText("Syncing…" if busy else "Sync Servers")
 
     def _open_setup_help(self) -> None:
         item = help_for_status(

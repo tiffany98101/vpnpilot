@@ -19,8 +19,10 @@ a **user-editable preset library** seeded with a Seattle entry on first
 run, an in-memory **server catalog** (country + city list from the CLI,
 lazy-fetch + background prewarm, `vpnpilot catalog dump` diagnostic
 command), and a **server browser tab** (two-pane country/city view with
-filters, feature badges, server-ID escape hatch). Preset editor Country
-and City fields are now catalog-backed editable comboboxes. The tray's
+filters, feature badges, server-ID escape hatch). The main window footer has
+a **Sync Servers** action that refreshes the shared catalog without connecting
+or disconnecting. Preset editor Country and City fields are now
+catalog-backed editable comboboxes. The tray's
 connect section is dynamic — top entry is the default preset, a
 "Connect to…" submenu lists the rest. No settings UI or event log yet.
 
@@ -144,8 +146,11 @@ Module roles:
   view and action buttons; takes action callbacks at construction so it
   doesn't depend on `Controller` or `PresetEditorDialog` directly.
   The Browse tab is `BrowseTab` from `browser.py` — added only when
-  catalog is provided (always in the full app, optional in tests).
-  Hide-on-close so reopen is cheap.
+  catalog is provided (always in the full app, optional in tests). The
+  Sync Servers footer button calls `ServerCatalog.refresh()` and
+  `ServerCatalog.prewarm()`, disables itself while waiting for the countries
+  catalog to emit `catalog_changed("")`, and never calls controller connect
+  or disconnect methods. Hide-on-close so reopen is cheap.
 - `browser.py` — `BrowseTab(QWidget)`: catalog-backed two-pane country/
   city view. **Secondary discovery path — presets are still the primary
   daily-use connect surface.** `CountryListModel` / `CityListModel` are
@@ -377,11 +382,16 @@ only events:
 ```sh
 make install-dev   # python3 -m venv .venv; pip install -e .[dev]
 make run           # python -m vpnpilot from the venv
-make test          # pytest (29 tests; mocks subprocess, fakes sysfs)
+make test          # pytest (mocks subprocess, fakes sysfs)
 make lint          # ruff (excludes src/vpnpilot/_vendor)
 make rpm           # builds ./dist/vpnpilot-<v>-<n>.fc44.noarch.rpm
 make clean         # removes dist/, .rpmbuild/, __pycache__/
 ```
+
+For pre-commit review builds, `make rpm` creates the source tarball from
+tracked files in the current working tree so dirty tracked changes are included.
+The release helper `./scripts/build-rpm.sh` is the CI/tag path and writes
+RPM/SRPM artifacts under `~/rpmbuild/`.
 
 ### Building the RPM from scratch on a fresh Fedora 44
 

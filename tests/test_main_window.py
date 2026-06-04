@@ -35,6 +35,41 @@ class FakeController(QObject):
         self.connect_preset = MagicMock()
 
 
+class FakeCatalog(QObject):
+    """Catalog double for main-window sync wiring."""
+
+    catalog_changed = pyqtSignal(str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.refresh = MagicMock()
+        self.prewarm = MagicMock()
+
+    def countries_if_ready(self):
+        return None
+
+    def cities_if_loaded(self, _code: str):
+        return None
+
+    def entry_state(self, _code: str):
+        from vpnpilot.catalog.models import EntryState
+
+        return EntryState.NOT_FETCHED
+
+    def entry_error(self, _code: str):
+        return None
+
+    def cities(self, _code: str):
+        from vpnpilot.catalog.models import CatalogEntry
+
+        return CatalogEntry(country_code="US")
+
+    async def countries(self):
+        from vpnpilot.catalog.models import CatalogError
+
+        raise CatalogError("not loaded")
+
+
 @pytest.fixture
 def qapp_instance():
     return QApplication.instance() or QApplication([])
@@ -129,6 +164,50 @@ def test_main_window_disconnect_button_calls_controller(qapp_instance, qtbot, st
     ctrl.state_changed.emit(ConnectionInfo(state=ConnState.CONNECTED, server="US-WA#187"))
     win.disconnect_btn.click()
     ctrl.disconnect.assert_called_once()
+
+
+def test_main_window_sync_servers_refreshes_and_prewarms_catalog(qapp_instance, qtbot, store):
+    ctrl = FakeController()
+    catalog = FakeCatalog()
+    win = MainWindow(ctrl, store, catalog=catalog)
+    qtbot.addWidget(win)
+
+    assert win.sync_servers_btn.text() == "Sync Servers"
+
+    win.sync_servers_btn.click()
+
+    catalog.refresh.assert_called_once_with()
+    catalog.prewarm.assert_called_once_with()
+    ctrl.disconnect.assert_not_called()
+    ctrl.connect_preset.assert_not_called()
+    assert win.sync_servers_btn.isEnabled() is False
+    assert win.sync_servers_btn.text() == "Syncing…"
+    assert win.browse_tab is not None
+    assert "Syncing server list" in win.browse_tab.hint_label.text()
+    assert win.browse_tab.refresh_btn.isEnabled() is False
+
+    catalog.catalog_changed.emit("")
+
+    assert win.sync_servers_btn.isEnabled() is True
+    assert win.sync_servers_btn.text() == "Sync Servers"
+    assert win.browse_tab.refresh_btn.isEnabled() is True
+
+
+def test_main_window_sync_servers_recovers_when_prewarm_cannot_start(qapp_instance, qtbot, store):
+    ctrl = FakeController()
+    catalog = FakeCatalog()
+    catalog.prewarm.side_effect = RuntimeError("no running loop")
+    win = MainWindow(ctrl, store, catalog=catalog)
+    qtbot.addWidget(win)
+
+    win.sync_servers_btn.click()
+
+    catalog.refresh.assert_called_once_with()
+    assert win.sync_servers_btn.isEnabled() is True
+    assert win.sync_servers_btn.text() == "Sync Servers"
+    assert win.browse_tab is not None
+    assert win.browse_tab.refresh_btn.isEnabled() is True
+    assert "could not start" in win.browse_tab.hint_label.text()
 
 
 def test_disconnect_stays_enabled_even_when_signed_out(qapp_instance, qtbot, store):

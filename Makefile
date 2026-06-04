@@ -21,6 +21,7 @@ RUFF    := $(VENV)/bin/ruff
 
 DIST    := dist
 RPMTOP  := $(CURDIR)/.rpmbuild
+RPMTMP  := $(RPMTOP)/tmp
 
 .PHONY: help install-dev run test lint rpm sdist clean
 
@@ -47,17 +48,18 @@ lint: install-dev
 sdist:
 	@mkdir -p $(DIST)
 	@rm -f $(DIST)/$(PROJECT)-$(VERSION).tar.gz
-	git archive --format=tar.gz --prefix=$(PROJECT)-$(VERSION)/ \
-		-o $(DIST)/$(PROJECT)-$(VERSION).tar.gz HEAD
+	git ls-files -z | tar --null --files-from - \
+		--transform='s#^#$(PROJECT)-$(VERSION)/#' \
+		-czf $(DIST)/$(PROJECT)-$(VERSION).tar.gz
 
 rpm: sdist
 	@command -v rpmbuild >/dev/null 2>&1 || { \
 		echo "rpmbuild not found. Install with: sudo dnf install rpm-build python3-devel pyproject-rpm-macros desktop-file-utils"; exit 1; }
-	rm -rf $(RPMTOP)
-	mkdir -p $(RPMTOP)/{SOURCES,SPECS,BUILD,BUILDROOT,RPMS,SRPMS}
+	rm -rf $(RPMTOP)/BUILD $(RPMTOP)/BUILDROOT $(RPMTMP)
+	mkdir -p $(RPMTOP)/{SOURCES,SPECS,BUILD,BUILDROOT,RPMS,SRPMS,tmp}
 	cp $(DIST)/$(PROJECT)-$(VERSION).tar.gz $(RPMTOP)/SOURCES/
 	cp packaging/$(PROJECT).spec $(RPMTOP)/SPECS/
-	rpmbuild --define "_topdir $(RPMTOP)" -bb $(RPMTOP)/SPECS/$(PROJECT).spec
+	rpmbuild --define "_topdir $(RPMTOP)" --define "_tmppath $(RPMTMP)" --define "_smp_build_ncpus 1" -bb $(RPMTOP)/SPECS/$(PROJECT).spec
 	cp $(RPMTOP)/RPMS/noarch/$(PROJECT)-$(VERSION)-*.noarch.rpm $(DIST)/
 	@echo
 	@echo "Built RPM(s) in $(DIST):"

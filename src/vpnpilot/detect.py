@@ -14,7 +14,6 @@ import asyncio
 import contextlib
 import os
 import re
-import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -127,16 +126,16 @@ class InterfaceDetector(Detector):
         self._ip = ip_bin
 
     async def detect(self) -> ConnectionInfo:
-        obs = await asyncio.to_thread(self._observe)
+        obs = await self._observe()
         if obs.name and obs.up:
             return ConnectionInfo(state=ConnState.CONNECTED, interface=obs.name)
         return ConnectionInfo(state=ConnState.DISCONNECTED)
 
-    def _observe(self) -> IfaceObservation:
+    async def _observe(self) -> IfaceObservation:
         try:
             names = os.listdir(self._sysfs)
         except OSError:
-            return self._observe_via_ip()
+            return await self._observe_via_ip()
         for name in names:
             if not PROTON_IFACE_RE.match(name):
                 continue
@@ -155,19 +154,11 @@ class InterfaceDetector(Detector):
         except (OSError, ValueError):
             return None
 
-    def _observe_via_ip(self) -> IfaceObservation:
-        try:
-            cp = subprocess.run(
-                [self._ip, "-o", "link", "show"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-        except (OSError, subprocess.TimeoutExpired):
+    async def _observe_via_ip(self) -> IfaceObservation:
+        result = await _run_command([self._ip, "-o", "link", "show"], timeout=5.0)
+        if not result.ok:
             return IfaceObservation(name=None, up=False)
-        if cp.returncode != 0:
-            return IfaceObservation(name=None, up=False)
-        for line in cp.stdout.splitlines():
+        for line in result.stdout.splitlines():
             try:
                 _, name, flagsblob, *_ = line.split(maxsplit=3)
             except ValueError:
@@ -245,9 +236,7 @@ class NetworkStatusDetector(Detector):
     @staticmethod
     def _has_default_route(stdout: str) -> bool:
         return any(
-            line.split(maxsplit=1)[0] == "default"
-            for line in stdout.splitlines()
-            if line.strip()
+            line.split(maxsplit=1)[0] == "default" for line in stdout.splitlines() if line.strip()
         )
 
     async def _nm_connectivity(self) -> str | None:
@@ -257,7 +246,11 @@ class NetworkStatusDetector(Detector):
         )
         if not result.ok:
             return None
-        value = result.stdout.strip().splitlines()[0].strip().casefold() if result.stdout.strip() else ""
+        value = (
+            result.stdout.strip().splitlines()[0].strip().casefold()
+            if result.stdout.strip()
+            else ""
+        )
         return value or None
 
 

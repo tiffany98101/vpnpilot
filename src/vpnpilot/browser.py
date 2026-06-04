@@ -176,9 +176,7 @@ class CityListModel(QAbstractListModel):
             return None
         city = self._cities[row]
         if role == Qt.ItemDataRole.DisplayRole:
-            badges = "  ".join(
-                _FEATURE_LABELS.get(f, str(f)) for f in sorted(city.features)
-            )
+            badges = "  ".join(_FEATURE_LABELS.get(f, str(f)) for f in sorted(city.features))
             return f"{city.name}  [{badges}]" if badges else city.name
         if role == self.CityRole:
             return city
@@ -225,8 +223,7 @@ class BrowseTab(QWidget):
         auth_layout = QVBoxLayout(auth_page)
         auth_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         auth_label = QLabel(
-            "Sign in to browse servers.\n\n"
-            "Use the Sign in… option in the tray menu."
+            "Sign in to browse servers.\n\nUse the Sign in… option in the tray menu."
         )
         auth_label.setObjectName("browseAuthNotice")
         auth_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -351,9 +348,7 @@ class BrowseTab(QWidget):
         self.country_filter.textChanged.connect(
             lambda t: self._country_proxy.setFilterFixedString(t)
         )
-        self.city_filter.textChanged.connect(
-            lambda t: self._city_proxy.setFilterFixedString(t)
-        )
+        self.city_filter.textChanged.connect(lambda t: self._city_proxy.setFilterFixedString(t))
         country_sel = self.country_list.selectionModel()
         country_sel.selectionChanged.connect(self._on_country_selection_changed)
         city_sel = self.city_list.selectionModel()
@@ -372,6 +367,23 @@ class BrowseTab(QWidget):
         """Call when the tab becomes visible to trigger a load if needed."""
         self._schedule_load_countries()
 
+    def prepare_for_catalog_refresh(self, hint: str = "Refreshing…") -> None:
+        """Clear transient selection while the shared catalog is being refreshed."""
+        self.country_list.clearSelection()
+        self.city_list.clearSelection()
+        self._city_model.clear()
+        self._selected_country = None
+        self.city_header.setText("Select a country")
+        self.connect_btn.setEnabled(False)
+        self.refresh_btn.setEnabled(False)
+        self.hint_label.setText(hint)
+
+    def finish_catalog_refresh(self, hint: str | None = None) -> None:
+        """Restore controls after a shared catalog refresh finishes or aborts."""
+        self.refresh_btn.setEnabled(True)
+        if hint is not None:
+            self.hint_label.setText(hint)
+
     # ----- connection-state handling -----
 
     def _on_state_changed(self, info: ConnectionInfo) -> None:
@@ -387,6 +399,9 @@ class BrowseTab(QWidget):
         if country_code == "":
             # Countries list updated.
             countries = self._catalog.countries_if_ready()
+            self.finish_catalog_refresh(
+                None if countries is not None else "Could not load countries."
+            )
             if countries is not None:
                 self._country_model.set_countries(countries)
         else:
@@ -448,16 +463,10 @@ class BrowseTab(QWidget):
         try:
             self._controller.connect_to_server_id(raw)
         except ValueError:
-            self.hint_label.setText(
-                f"Invalid server ID \"{raw}\". Format: US-WA#232 or IT#23."
-            )
+            self.hint_label.setText(f'Invalid server ID "{raw}". Format: US-WA#232 or IT#23.')
 
     def _on_refresh(self) -> None:
-        self._city_model.clear()
-        self._selected_country = None
-        self.city_header.setText("Select a country")
-        self.hint_label.setText("Refreshing…")
-        self.refresh_btn.setEnabled(False)
+        self.prepare_for_catalog_refresh()
         self._catalog.refresh()
         self._schedule_load_countries()
         # Re-enable once the catalog_changed("") arrives.

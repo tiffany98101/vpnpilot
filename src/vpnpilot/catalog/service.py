@@ -141,8 +141,9 @@ class ServerCatalog(QObject):
         Safe to call multiple times; only one prewarm task runs at a time.
         """
         if self._prewarm_task is None or self._prewarm_task.done():
+            loop = asyncio.get_running_loop()
             generation = self._generation
-            self._prewarm_task = asyncio.create_task(
+            self._prewarm_task = loop.create_task(
                 self._prewarm_loop(generation), name="vpnpilot-catalog-prewarm"
             )
 
@@ -203,7 +204,9 @@ class ServerCatalog(QObject):
         else:
             self._countries = None
             self._countries_error = result.stderr.strip()
-            log.warning("countries list failed (exit %d): %s", result.returncode, self._countries_error)
+            log.warning(
+                "countries list failed (exit %d): %s", result.returncode, self._countries_error
+            )
         self.catalog_changed.emit("")
 
     async def _fetch_cities(self, country_code: str, generation: int) -> None:

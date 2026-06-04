@@ -45,6 +45,7 @@ class FakeController(QObject):
 
     def connect_to_server_id(self, server_id: str) -> None:
         from vpnpilot.controller import _SERVER_ID_RE
+
         normalized = server_id.strip().upper()
         if not _SERVER_ID_RE.match(normalized):
             raise ValueError(f"Invalid server ID: {server_id!r}")
@@ -99,6 +100,7 @@ class FakeCatalog(QObject):
     async def countries(self):
         if self._countries is None:
             from vpnpilot.catalog.models import CatalogError
+
             raise CatalogError("not loaded")
         return self._countries
 
@@ -274,7 +276,9 @@ def test_browse_tab_cities_pane_shows_feature_badges(qapp, qtbot):
 
     # Select United States (row 2 after sort: Germany, Iceland, United States).
     tab.country_list.setCurrentIndex(tab._country_proxy.index(2, 0))
-    texts = [tab._city_model.data(tab._city_model.index(i)) for i in range(tab._city_model.rowCount())]
+    texts = [
+        tab._city_model.data(tab._city_model.index(i)) for i in range(tab._city_model.rowCount())
+    ]
     atlanta_text = next(t for t in texts if "Atlanta" in t)
     assert "P2P" in atlanta_text
     assert "Tor" in atlanta_text
@@ -396,6 +400,26 @@ def test_browse_tab_refresh_calls_catalog_refresh(qapp, qtbot):
     assert cat.refresh_called == 1
 
 
+def test_browse_tab_prepare_for_catalog_refresh_clears_selection(qapp, qtbot):
+    cat = FakeCatalog(countries=_COUNTRIES)
+    cat.set_entry_loaded("DE", _DE_CITIES)
+    ctrl = _make_controller()
+    tab = BrowseTab(catalog=cat, controller=ctrl)
+    qtbot.addWidget(tab)
+
+    tab.country_list.setCurrentIndex(tab._country_proxy.index(0, 0))
+    assert tab._selected_country is not None
+    assert tab.connect_btn.isEnabled() is True
+
+    tab.prepare_for_catalog_refresh("Syncing server list…")
+
+    assert tab._selected_country is None
+    assert tab._city_model.rowCount() == 0
+    assert tab.connect_btn.isEnabled() is False
+    assert tab.refresh_btn.isEnabled() is False
+    assert "Syncing server list" in tab.hint_label.text()
+
+
 def test_browse_tab_signed_out_shows_auth_page(qapp, qtbot):
     cat = FakeCatalog(countries=_COUNTRIES)
     ctrl = _make_controller(auth=AuthState.SIGNED_OUT)
@@ -427,11 +451,28 @@ def test_browse_tab_catalog_changed_updates_country_model(qapp, qtbot):
 
     assert tab._country_model.rowCount() == 0
 
+    tab.prepare_for_catalog_refresh("Syncing server list…")
+    assert tab.refresh_btn.isEnabled() is False
+
     # Simulate catalog loading countries and emitting the signal.
     cat._countries = _COUNTRIES
     tab._on_catalog_changed("")
 
     assert tab._country_model.rowCount() == 3
+    assert tab.refresh_btn.isEnabled() is True
+
+
+def test_browse_tab_catalog_changed_allows_retry_when_countries_fail(qapp, qtbot):
+    cat = FakeCatalog(countries=None)
+    ctrl = _make_controller()
+    tab = BrowseTab(catalog=cat, controller=ctrl)
+    qtbot.addWidget(tab)
+
+    tab.prepare_for_catalog_refresh("Syncing server list…")
+    tab._on_catalog_changed("")
+
+    assert tab.refresh_btn.isEnabled() is True
+    assert "Could not load countries" in tab.hint_label.text()
 
 
 def test_browse_tab_catalog_changed_updates_cities_for_selected_country(qapp, qtbot):
